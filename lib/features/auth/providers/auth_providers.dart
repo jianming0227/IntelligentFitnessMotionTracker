@@ -17,7 +17,6 @@ final authStateStreamProvider = StreamProvider<AuthState>((ref) {
 class AuthController extends AsyncNotifier<void> {
   @override
   Future<void> build() async {
-    // No initial loading needed — we just track future actions
   }
 
   Future<void> signIn({

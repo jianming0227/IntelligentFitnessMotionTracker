@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../core/widgets/app_logo.dart';
 import '../../../core/widgets/gradient_background.dart';
+import '../../train/models/exercise.dart';
 
 // FR-3.2: Home screen — shows an empty coaching prompt until the user completes
 // their first session. After each session, a Gemini-generated plan is saved and
@@ -142,8 +144,22 @@ class _PlanView extends StatelessWidget {
     }
   }
 
+  // Detect which exercise to launch from the Gemini plan text.
+  Exercise? _detectExercise() {
+    final lower = plan.toLowerCase();
+    if (lower.contains('bicep curl')) {
+      return Exercise.all.firstWhere((e) => e.id == 'bicep_curl');
+    }
+    if (lower.contains('squat')) {
+      return Exercise.all.firstWhere((e) => e.id == 'squat');
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final detected = _detectExercise();
+
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       children: [
@@ -176,6 +192,25 @@ class _PlanView extends StatelessWidget {
           ),
           child: Text(plan, style: AppTextStyles.bodyLarge),
         ),
+        if (detected != null) ...[
+          const SizedBox(height: 20),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              minimumSize: const Size.fromHeight(52),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+            icon: const Icon(Icons.fitness_center),
+            label: Text(
+              'Start Today\'s Session — ${detected.name}',
+              style: AppTextStyles.button.copyWith(color: Colors.white),
+            ),
+            onPressed: () => context.push('/train/camera', extra: detected),
+          ),
+        ],
         const SizedBox(height: 24),
       ],
     );

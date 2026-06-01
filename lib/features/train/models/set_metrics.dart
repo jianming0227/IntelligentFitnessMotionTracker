@@ -8,6 +8,7 @@ class SetMetrics {
     required this.fatigueIndex,
     required this.repDurationsMs,
     required this.completedAt,
+    this.tutMs = 0,
   });
 
   final int setNumber;
@@ -24,6 +25,9 @@ class SetMetrics {
   final List<int> repDurationsMs;
   final DateTime completedAt;
 
+  // FR-2.4: Total milliseconds the joint spent inside the target angle zone.
+  final int tutMs;
+
   String get formPercent => '${(formScore * 100).round()}%';
 
   String get fatigueLabel {
@@ -32,7 +36,10 @@ class SetMetrics {
     return 'High';
   }
 
+  // e.g. "4.2s" — used in the HUD and Gemini prompt.
+  String get tutLabel => '${(tutMs / 1000).toStringAsFixed(1)}s';
+
   // One-line text summary used as input to Gemini session history.
   String toHistorySummary() =>
-      'Set $setNumber: $repsCompleted reps, form $formPercent, fatigue $fatigueLabel';
+      'Set $setNumber: $repsCompleted reps, form $formPercent, fatigue $fatigueLabel, TUT $tutLabel';
 }

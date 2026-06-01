@@ -1,49 +1,32 @@
-# .understandignore — patterns for files/dirs to exclude from analysis
-# Syntax: same as .gitignore (globs, # comments, ! negation, trailing / for dirs)
-# Lines below are suggestions — uncomment to activate.
-# Use ! prefix to force-include something excluded by defaults.
+# .understandignore — focus analysis on lib/ Dart source only
 #
 # Built-in defaults (always excluded unless negated):
-#   node_modules/, .git/, dist/, build/, obj/, *.lock, *.min.js, etc.
-#
-# --- From .gitignore (uncomment to exclude) ---
+#   build/, .git/, *.lock, etc.
 
-# *.class
-# *.pyc
-# *.swp
-# .DS_Store
-# .atom/
-# .build/
-# .buildlog/
-# .history
-# .svn/
-# .swiftpm/
-# migrate_working_dir/
-# *.iml
-# *.ipr
-# *.iws
-# **/doc/api/
-# **/ios/Flutter/.last_build_id
-# .dart_tool/
-# .flutter-plugins-dependencies
-# .pub-cache/
-# .pub/
-# /build/
-# /coverage/
-# app.*.symbols
-# app.*.map.json
-# /android/app/debug
-# /android/app/profile
-# /android/app/release
-# .env
-# .env.local
+# Platform folders — not Dart source
+android/
+ios/
+linux/
+macos/
+web/
+windows/
 
-# --- Detected directories (uncomment to exclude) ---
+# Flutter/Dart tooling — generated files
+.dart_tool/
+.pub-cache/
+.pub/
+.flutter-plugins-dependencies
+.flutter-plugins
 
-# test/
+# Config/build files at root — not application logic
+pubspec.lock
+analysis_options.yaml
+devtools_options.yaml
+*.iml
+*.ipr
+*.iws
 
-# --- Test file patterns (uncomment to exclude) ---
-
-# *.test.*
-# *.spec.*
-# *.snap
+# Docs and requirements — skip from graph
+README.md
+Requirements.md
+TRACKER.md

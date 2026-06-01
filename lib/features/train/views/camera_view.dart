@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -54,8 +55,19 @@ class _CameraViewState extends State<CameraView> {
   int _totalFrames = 0;
   final List<SetMetrics> _completedSets = [];
 
+  // FR-2.4: TUT — tracks when the joint entered the target zone to accumulate ms.
+  DateTime? _tutZoneEnteredAt;
+  int _tutMs = 0;
+
   // True while the coaching bottom sheet is visible — pauses rep counting.
   bool _sessionPaused = false;
+
+  // ── FR-2.3: TTS corrective voice-overs ──────────────────────────────────────
+  final FlutterTts _tts = FlutterTts();
+  // Timestamp of the last spoken cue — enforces the 4 s debounce.
+  DateTime? _lastCueAt;
+  // How long the angle has continuously been outside the target zone.
+  DateTime? _badFormSince;
 
   // ── UI ──────────────────────────────────────────────────────────────────────
   bool _showGauge = true;
@@ -69,6 +81,10 @@ class _CameraViewState extends State<CameraView> {
   }
 
   Future<void> _init() async {
+    await _tts.setLanguage('en-US');
+    await _tts.setSpeechRate(0.5);
+    await _tts.setVolume(1.0);
+
     final status = await Permission.camera.request();
     if (!status.isGranted) {
       if (mounted) setState(() => _permissionDenied = true);
@@ -111,14 +127,23 @@ class _CameraViewState extends State<CameraView> {
 
       double? angle;
       if (poses.isNotEmpty) {
-        angle = _kneeAngle(poses.first);
+        angle = _jointAngle(poses.first);
         if (angle != null) {
           // FR-3.1: Track how many frames the joint is within the target zone
           _totalFrames++;
-          if (angle >= widget.exercise.targetAngleMin &&
-              angle <= widget.exercise.targetAngleMax) {
+          final inZone = angle >= widget.exercise.targetAngleMin &&
+              angle <= widget.exercise.targetAngleMax;
+          if (inZone) {
             _greenFrames++;
+            // FR-2.4: Accumulate TUT — add elapsed ms since entering the zone
+            final now = DateTime.now();
+            _tutZoneEnteredAt ??= now;
+            _tutMs += now.difference(_tutZoneEnteredAt!).inMilliseconds;
+            _tutZoneEnteredAt = now;
+          } else {
+            _tutZoneEnteredAt = null;
           }
+          _checkBadForm(angle);
           _countRep(angle);
         }
       }
@@ -154,7 +179,53 @@ class _CameraViewState extends State<CameraView> {
     );
   }
 
-  // FR-2.2: Joint angle calculation — measures knee angle (hip → knee → ankle).
+  // FR-2.3: Fires a TTS correction cue when the joint angle has been outside
+  // the target zone continuously for >1.5 s. Debounced to once per 4 s.
+  void _checkBadForm(double angle) {
+    final inZone = angle >= widget.exercise.targetAngleMin &&
+        angle <= widget.exercise.targetAngleMax;
+
+    if (inZone) {
+      _badFormSince = null;
+      return;
+    }
+
+    final now = DateTime.now();
+    _badFormSince ??= now;
+
+    final badDuration = now.difference(_badFormSince!);
+    if (badDuration.inMilliseconds < 1500) return;
+
+    final debounceOk = _lastCueAt == null ||
+        now.difference(_lastCueAt!).inSeconds >= 4;
+    if (!debounceOk) return;
+
+    _lastCueAt = now;
+    _badFormSince = now; // reset so the next cue waits another 1.5 s
+
+    final cues = widget.exercise.id == 'bicep_curl'
+        ? [
+            'Full extension at the bottom',
+            'Squeeze at the top',
+            'Keep your elbow still',
+          ]
+        : [
+            'Go deeper',
+            'Keep your chest up',
+            'Knees track over toes',
+          ];
+
+    final cue = cues[DateTime.now().second % cues.length];
+    _tts.speak(cue);
+  }
+
+  // FR-2.2: Routes to the correct angle calculation based on the exercise.
+  double? _jointAngle(Pose pose) {
+    if (widget.exercise.id == 'bicep_curl') return _elbowAngle(pose);
+    return _kneeAngle(pose);
+  }
+
+  // FR-2.2: Knee angle (hip → knee → ankle) — used for squats.
   double? _kneeAngle(Pose pose) {
     final hip = pose.landmarks[PoseLandmarkType.leftHip];
     final knee = pose.landmarks[PoseLandmarkType.leftKnee];
@@ -163,6 +234,20 @@ class _CameraViewState extends State<CameraView> {
 
     final ba = Offset(hip.x - knee.x, hip.y - knee.y);
     final bc = Offset(ankle.x - knee.x, ankle.y - knee.y);
+    final cosA =
+        (ba.dx * bc.dx + ba.dy * bc.dy) / (ba.distance * bc.distance);
+    return acos(cosA.clamp(-1.0, 1.0)) * 180 / pi;
+  }
+
+  // FR-2.2: Elbow angle (shoulder → elbow → wrist) — used for bicep curls.
+  double? _elbowAngle(Pose pose) {
+    final shoulder = pose.landmarks[PoseLandmarkType.leftShoulder];
+    final elbow = pose.landmarks[PoseLandmarkType.leftElbow];
+    final wrist = pose.landmarks[PoseLandmarkType.leftWrist];
+    if (shoulder == null || elbow == null || wrist == null) return null;
+
+    final ba = Offset(shoulder.x - elbow.x, shoulder.y - elbow.y);
+    final bc = Offset(wrist.x - elbow.x, wrist.y - elbow.y);
     final cosA =
         (ba.dx * bc.dx + ba.dy * bc.dy) / (ba.distance * bc.distance);
     return acos(cosA.clamp(-1.0, 1.0)) * 180 / pi;
@@ -216,6 +301,7 @@ class _CameraViewState extends State<CameraView> {
       fatigueIndex: fatigueIndex,
       repDurationsMs: durations,
       completedAt: DateTime.now(),
+      tutMs: _tutMs,
     );
 
     _completedSets.add(metrics);
@@ -223,6 +309,8 @@ class _CameraViewState extends State<CameraView> {
     // Reset per-set counters
     _greenFrames = 0;
     _totalFrames = 0;
+    _tutMs = 0;
+    _tutZoneEnteredAt = null;
     _currentRepDurations.clear();
 
     setState(() {});
@@ -273,6 +361,7 @@ class _CameraViewState extends State<CameraView> {
     _controller?.stopImageStream();
     _controller?.dispose();
     _detector.close();
+    _tts.stop();
     super.dispose();
   }
 
