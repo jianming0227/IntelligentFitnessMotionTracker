@@ -48,4 +48,9 @@ app.*.map.json
 .env
 .env.local
 
+# plugins
 .understand-anything
+
+Requirements.md
+TRACKER.md
+SUBMISSION.md
