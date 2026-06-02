@@ -8,12 +8,15 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../features/auth/views/login_view.dart';
 import '../features/auth/views/register_view.dart';
 import '../features/home/views/home_view.dart';
+import '../features/plan/views/plan_screen.dart';
+import '../features/profile/views/biometric_survey_view.dart';
+import '../features/profile/views/profile_view.dart';
 import '../features/session/views/session_summary_view.dart';
+import '../features/shell/views/app_shell.dart';
 import '../features/train/models/exercise.dart';
 import '../features/train/views/camera_view.dart';
+import '../features/train/views/exercise_detail_view.dart';
 import '../features/train/views/train_view.dart';
-import '../features/profile/views/profile_view.dart';
-import '../features/shell/views/app_shell.dart';
 
 // Wraps a Dart Stream into a ChangeNotifier so GoRouter can re-run redirect
 // every time auth state changes (sign in, sign out, token refresh).
@@ -44,11 +47,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       final loc = state.matchedLocation;
       final onAuthScreen = loc == '/login' || loc == '/register';
 
-      // Logged in but on login/register → push to home
       if (isLoggedIn && onAuthScreen) return '/home';
-      // Not logged in but trying to reach a protected screen → push to login
       if (!isLoggedIn && !onAuthScreen) return '/login';
-      // No redirect needed
       return null;
     },
     routes: [
@@ -59,16 +59,25 @@ final routerProvider = Provider<GoRouter>((ref) {
         routes: [
           GoRoute(path: '/home', builder: (_, _) => const HomeView()),
           GoRoute(path: '/train', builder: (_, _) => const TrainView()),
+          GoRoute(path: '/plan', builder: (_, _) => const PlanScreen()),
           GoRoute(path: '/profile', builder: (_, _) => const ProfileView()),
         ],
       ),
-      // Camera screen is outside the shell so it is full-screen (no bottom nav)
+      // Full-screen routes — no bottom nav
+      GoRoute(
+        path: '/survey',
+        builder: (_, _) => const BiometricSurveyView(),
+      ),
+      GoRoute(
+        path: '/train/detail',
+        builder: (context, state) =>
+            ExerciseDetailView(exercise: state.extra as Exercise),
+      ),
       GoRoute(
         path: '/train/camera',
         builder: (context, state) =>
             CameraView(exercise: state.extra as Exercise),
       ),
-      // Session summary is full-screen (no bottom nav); receives SessionSummaryData via extra
       GoRoute(
         path: '/session/summary',
         builder: (context, state) =>
