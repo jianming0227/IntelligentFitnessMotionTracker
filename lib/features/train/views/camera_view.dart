@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:camera/camera.dart';
@@ -7,8 +8,6 @@ import 'package:go_router/go_router.dart';
 import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_text_styles.dart';
 import '../../session/views/session_summary_view.dart';
 import '../models/exercise.dart';
 import '../models/set_metrics.dart';
@@ -26,13 +25,13 @@ class CameraView extends StatefulWidget {
 }
 
 class _CameraViewState extends State<CameraView> {
-  // ── FR-2.1: Camera — live feed capture ──────────────────────────────────────
+  // ── FR-2.1: Camera ──────────────────────────────────────────────────────────
   List<CameraDescription> _cameras = [];
   CameraController? _controller;
   int _cameraIndex = 0;
   bool _permissionDenied = false;
 
-  // ── FR-2.1: ML Kit pose detector — 33 skeletal landmark extraction ───────────
+  // ── FR-2.1: ML Kit pose detector ────────────────────────────────────────────
   final _detector = PoseDetector(
     options: PoseDetectorOptions(mode: PoseDetectionMode.stream),
   );
@@ -40,34 +39,44 @@ class _CameraViewState extends State<CameraView> {
   List<Pose> _poses = [];
   double? _currentAngle;
 
-  // ── FR-2.4: Rep counter state ────────────────────────────────────────────────
+  // ── FR-2.4: Rep counter state ───────────────────────────────────────────────
   bool _isDown = false;
   int _repCount = 0;
   int _currentSet = 1;
   static const int _totalSets = 3;
   static const int _targetReps = 10;
 
-  // ── FR-3.1: Per-set metrics collection ──────────────────────────────────────
-  // Tracks per-rep durations and green-zone frame ratio for SetMetrics packaging.
+  // ── FR-3.1: Per-set metrics ─────────────────────────────────────────────────
   DateTime? _repStartTime;
+  DateTime? _phaseEnteredAt; // when current down/up phase began
   final List<int> _currentRepDurations = [];
   int _greenFrames = 0;
   int _totalFrames = 0;
   final List<SetMetrics> _completedSets = [];
 
-  // FR-2.4: TUT — tracks when the joint entered the target zone to accumulate ms.
+  // FR-2.4: TUT — time the joint spent in the form-gauge green zone.
   DateTime? _tutZoneEnteredAt;
   int _tutMs = 0;
 
-  // True while the coaching bottom sheet is visible — pauses rep counting.
-  bool _sessionPaused = false;
+  // ── Session lifecycle ───────────────────────────────────────────────────────
+  bool _sessionPaused = false; // true while bottom sheet visible or counting down
+  bool _sessionStarted = false;
+  DateTime? _gestureStartAt;
+  int _gestureCountdown = 3;
+  DateTime? _setStartTime;
+  Duration _setElapsed = Duration.zero;
+  Timer? _setTicker;
 
-  // ── FR-2.3: TTS corrective voice-overs ──────────────────────────────────────
+  // Inter-set rest countdown (5-4-3-2-1 overlay before next set).
+  int? _restCountdown;
+  Timer? _restTimer;
+
+  // ── TTS ─────────────────────────────────────────────────────────────────────
   final FlutterTts _tts = FlutterTts();
-  // Timestamp of the last spoken cue — enforces the 4 s debounce.
+  bool _ttsEnabled = true;
   DateTime? _lastCueAt;
-  // How long the angle has continuously been outside the target zone.
   DateTime? _badFormSince;
+  DateTime? _lastMotivationAt;
 
   // ── UI ──────────────────────────────────────────────────────────────────────
   bool _showGauge = true;
@@ -94,11 +103,16 @@ class _CameraViewState extends State<CameraView> {
     if (_cameras.isEmpty) return;
 
     _cameraIndex = _cameras.indexWhere(
-      (c) => c.lensDirection == CameraLensDirection.back,
+      (c) => c.lensDirection == CameraLensDirection.front,
     );
     if (_cameraIndex == -1) _cameraIndex = 0;
 
     await _startController();
+    Future.delayed(const Duration(milliseconds: 800), () {
+      if (mounted && _ttsEnabled) {
+        _tts.speak('Show your open hand to start the session');
+      }
+    });
   }
 
   Future<void> _startController() async {
@@ -127,24 +141,26 @@ class _CameraViewState extends State<CameraView> {
 
       double? angle;
       if (poses.isNotEmpty) {
-        angle = _jointAngle(poses.first);
-        if (angle != null) {
-          // FR-3.1: Track how many frames the joint is within the target zone
-          _totalFrames++;
-          final inZone = angle >= widget.exercise.targetAngleMin &&
-              angle <= widget.exercise.targetAngleMax;
-          if (inZone) {
-            _greenFrames++;
-            // FR-2.4: Accumulate TUT — add elapsed ms since entering the zone
-            final now = DateTime.now();
-            _tutZoneEnteredAt ??= now;
-            _tutMs += now.difference(_tutZoneEnteredAt!).inMilliseconds;
-            _tutZoneEnteredAt = now;
-          } else {
-            _tutZoneEnteredAt = null;
+        if (!_sessionStarted) {
+          _checkGesture(poses.first);
+        } else {
+          angle = _jointAngle(poses.first);
+          if (angle != null) {
+            _totalFrames++;
+            final inZone = angle >= widget.exercise.targetAngleMin &&
+                angle <= widget.exercise.targetAngleMax;
+            if (inZone) {
+              _greenFrames++;
+              final now = DateTime.now();
+              _tutZoneEnteredAt ??= now;
+              _tutMs += now.difference(_tutZoneEnteredAt!).inMilliseconds;
+              _tutZoneEnteredAt = now;
+            } else {
+              _tutZoneEnteredAt = null;
+            }
+            _checkBadForm(angle);
+            _countRep(angle);
           }
-          _checkBadForm(angle);
-          _countRep(angle);
         }
       }
 
@@ -159,7 +175,6 @@ class _CameraViewState extends State<CameraView> {
     }
   }
 
-  // FR-2.1: Convert raw NV21 camera frame into an InputImage for ML Kit.
   InputImage? _toInputImage(CameraImage image) {
     final camera = _cameras[_cameraIndex];
     final rotation =
@@ -179,113 +194,206 @@ class _CameraViewState extends State<CameraView> {
     );
   }
 
-  // FR-2.3: Fires a TTS correction cue when the joint angle has been outside
-  // the target zone continuously for >1.5 s. Debounced to once per 4 s.
+  // ── TTS coaching ────────────────────────────────────────────────────────────
   void _checkBadForm(double angle) {
     final inZone = angle >= widget.exercise.targetAngleMin &&
         angle <= widget.exercise.targetAngleMax;
 
     if (inZone) {
       _badFormSince = null;
+      if (_ttsEnabled) _maybeSpeakMotivation();
       return;
     }
+    if (!_ttsEnabled) return;
 
     final now = DateTime.now();
     _badFormSince ??= now;
+    if (now.difference(_badFormSince!).inMilliseconds < 1500) return;
 
-    final badDuration = now.difference(_badFormSince!);
-    if (badDuration.inMilliseconds < 1500) return;
-
-    final debounceOk = _lastCueAt == null ||
-        now.difference(_lastCueAt!).inSeconds >= 4;
+    final debounceOk =
+        _lastCueAt == null || now.difference(_lastCueAt!).inSeconds >= 4;
     if (!debounceOk) return;
 
     _lastCueAt = now;
-    _badFormSince = now; // reset so the next cue waits another 1.5 s
-
+    _badFormSince = now;
     final cues = widget.exercise.id == 'bicep_curl'
-        ? [
-            'Full extension at the bottom',
-            'Squeeze at the top',
-            'Keep your elbow still',
-          ]
-        : [
-            'Go deeper',
-            'Keep your chest up',
-            'Knees track over toes',
-          ];
-
-    final cue = cues[DateTime.now().second % cues.length];
-    _tts.speak(cue);
+        ? ['Full extension at the bottom', 'Squeeze at the top', 'Keep your elbow still']
+        : ['Go deeper', 'Keep your chest up', 'Knees track over toes'];
+    _tts.speak(cues[DateTime.now().second % cues.length]);
   }
 
-  // FR-2.2: Routes to the correct angle calculation based on the exercise.
+  void _maybeSpeakMotivation() {
+    final now = DateTime.now();
+    if (_lastMotivationAt != null &&
+        now.difference(_lastMotivationAt!).inSeconds < 10) {
+      return;
+    }
+    _lastMotivationAt = now;
+    const cues = ['Great form!', 'Keep it up!', 'Looking strong!', 'Perfect pace!'];
+    _tts.speak(cues[now.second % cues.length]);
+  }
+
+  // ── Joint angles + landmark confidence ──────────────────────────────────────
+
+  /// Returns the angle in degrees only if all three landmarks meet the
+  /// per-exercise confidence threshold. Low-confidence frames are dropped so
+  /// they can't toggle the rep state machine.
   double? _jointAngle(Pose pose) {
     if (widget.exercise.id == 'bicep_curl') return _elbowAngle(pose);
     return _kneeAngle(pose);
   }
 
-  // FR-2.2: Knee angle (hip → knee → ankle) — used for squats.
   double? _kneeAngle(Pose pose) {
     final hip = pose.landmarks[PoseLandmarkType.leftHip];
     final knee = pose.landmarks[PoseLandmarkType.leftKnee];
     final ankle = pose.landmarks[PoseLandmarkType.leftAnkle];
-    if (hip == null || knee == null || ankle == null) return null;
-
-    final ba = Offset(hip.x - knee.x, hip.y - knee.y);
-    final bc = Offset(ankle.x - knee.x, ankle.y - knee.y);
-    final cosA =
-        (ba.dx * bc.dx + ba.dy * bc.dy) / (ba.distance * bc.distance);
-    return acos(cosA.clamp(-1.0, 1.0)) * 180 / pi;
+    if (!_landmarksConfident([hip, knee, ankle])) return null;
+    return _angleAt(hip!, knee!, ankle!);
   }
 
-  // FR-2.2: Elbow angle (shoulder → elbow → wrist) — used for bicep curls.
   double? _elbowAngle(Pose pose) {
     final shoulder = pose.landmarks[PoseLandmarkType.leftShoulder];
     final elbow = pose.landmarks[PoseLandmarkType.leftElbow];
     final wrist = pose.landmarks[PoseLandmarkType.leftWrist];
-    if (shoulder == null || elbow == null || wrist == null) return null;
+    if (!_landmarksConfident([shoulder, elbow, wrist])) return null;
+    return _angleAt(shoulder!, elbow!, wrist!);
+  }
 
-    final ba = Offset(shoulder.x - elbow.x, shoulder.y - elbow.y);
-    final bc = Offset(wrist.x - elbow.x, wrist.y - elbow.y);
+  double _angleAt(PoseLandmark a, PoseLandmark b, PoseLandmark c) {
+    final ba = Offset(a.x - b.x, a.y - b.y);
+    final bc = Offset(c.x - b.x, c.y - b.y);
     final cosA =
         (ba.dx * bc.dx + ba.dy * bc.dy) / (ba.distance * bc.distance);
     return acos(cosA.clamp(-1.0, 1.0)) * 180 / pi;
   }
 
-  // FR-2.4 / FR-3.1: Rep counter that also records per-rep duration for fatigue
-  // index calculation. A rep = angle drops below targetAngleMax (down phase)
-  // then rises back above 160° (standing phase).
+  bool _landmarksConfident(List<PoseLandmark?> lms) {
+    final threshold = widget.exercise.minLandmarkConfidence;
+    for (final l in lms) {
+      if (l == null) return false;
+      if (l.likelihood < threshold) return false;
+    }
+    return true;
+  }
+
+  // ── Gesture start ───────────────────────────────────────────────────────────
+  bool _isOpenHand(Pose pose) {
+    bool handOpen(
+      PoseLandmark? wrist,
+      PoseLandmark? thumb,
+      PoseLandmark? index,
+      PoseLandmark? pinky,
+    ) {
+      if (wrist == null || thumb == null || index == null || pinky == null) {
+        return false;
+      }
+      return thumb.y < wrist.y && index.y < wrist.y && pinky.y < wrist.y;
+    }
+
+    return handOpen(
+          pose.landmarks[PoseLandmarkType.leftWrist],
+          pose.landmarks[PoseLandmarkType.leftThumb],
+          pose.landmarks[PoseLandmarkType.leftIndex],
+          pose.landmarks[PoseLandmarkType.leftPinky],
+        ) ||
+        handOpen(
+          pose.landmarks[PoseLandmarkType.rightWrist],
+          pose.landmarks[PoseLandmarkType.rightThumb],
+          pose.landmarks[PoseLandmarkType.rightIndex],
+          pose.landmarks[PoseLandmarkType.rightPinky],
+        );
+  }
+
+  void _checkGesture(Pose pose) {
+    if (!_isOpenHand(pose)) {
+      _gestureStartAt = null;
+      _gestureCountdown = 3;
+      return;
+    }
+    final now = DateTime.now();
+    _gestureStartAt ??= now;
+    final elapsed = now.difference(_gestureStartAt!).inSeconds;
+    _gestureCountdown = (3 - elapsed).clamp(0, 3);
+    if (elapsed >= 3) {
+      _beginSet(); // also flips _sessionStarted
+      if (_ttsEnabled) _tts.speak('Starting now');
+    }
+  }
+
+  // ── Rep counter (hardened) ──────────────────────────────────────────────────
+  //
+  // Three guards reject false positives:
+  //   1. Landmark confidence — frames with low likelihood produce no angle.
+  //   2. Strict thresholds   — angle must cross [repBottomAngleStrict] or
+  //                            [repTopAngleStrict] which sit *tighter* than
+  //                            the form gauge green zone.
+  //   3. Min phase duration  — once entered, a phase must persist at least
+  //                            [exercise.minRepDurationMs] before the opposite
+  //                            phase can fire. Kills sub-second jitter.
   void _countRep(double angle) {
-    if (_sessionPaused) return;
+    if (_sessionPaused || !_sessionStarted) return;
 
-    if (!_isDown && angle < widget.exercise.targetAngleMax) {
+    final ex = widget.exercise;
+    final bool atBottom;
+    final bool atTop;
+    if (ex.id == 'bicep_curl') {
+      atBottom = angle > ex.repBottomAngleStrict; // arm extended
+      atTop = angle < ex.repTopAngleStrict;        // arm curled
+    } else {
+      atBottom = angle < ex.repBottomAngleStrict;  // squat depth
+      atTop = angle > ex.repTopAngleStrict;        // standing
+    }
+
+    final now = DateTime.now();
+    final phaseAgeMs = _phaseEnteredAt == null
+        ? 0
+        : now.difference(_phaseEnteredAt!).inMilliseconds;
+
+    if (!_isDown && atBottom && phaseAgeMs >= ex.minRepDurationMs) {
       _isDown = true;
-      _repStartTime = DateTime.now(); // start timing this rep
-    } else if (_isDown && angle > 160) {
+      _phaseEnteredAt = now;
+      _repStartTime = now;
+    } else if (_isDown && atTop && phaseAgeMs >= ex.minRepDurationMs) {
       _isDown = false;
-
-      // FR-3.1: Log how long this rep took
+      _phaseEnteredAt = now;
       if (_repStartTime != null) {
         _currentRepDurations
-            .add(DateTime.now().difference(_repStartTime!).inMilliseconds);
+            .add(now.difference(_repStartTime!).inMilliseconds);
         _repStartTime = null;
       }
-
       _repCount++;
       if (_repCount >= _targetReps) {
         _onSetComplete();
       } else {
-        setState(() {}); // update rep display
+        setState(() {});
       }
+    } else {
+      // If the state isn't ready to flip, still anchor the phase start the
+      // first time we land in a recognisable position so the guard works.
+      _phaseEnteredAt ??= now;
     }
   }
 
-  // FR-3.1: Package set metrics and show the coaching bottom sheet.
+  // ── Set lifecycle ───────────────────────────────────────────────────────────
+  void _beginSet() {
+    _sessionStarted = true;
+    _setStartTime = DateTime.now();
+    _setElapsed = Duration.zero;
+    _phaseEnteredAt = null;
+    _setTicker?.cancel();
+    _setTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || _setStartTime == null) return;
+      setState(() {
+        _setElapsed = DateTime.now().difference(_setStartTime!);
+      });
+    });
+    setState(() {});
+  }
+
   void _onSetComplete() {
     _sessionPaused = true;
+    _setTicker?.cancel();
 
-    // Fatigue index: (last rep duration / first rep duration) - 1
     final durations = List<int>.from(_currentRepDurations);
     final fatigueIndex = (durations.length >= 2)
         ? ((durations.last / durations.first) - 1).clamp(0.0, 2.0)
@@ -306,16 +414,13 @@ class _CameraViewState extends State<CameraView> {
 
     _completedSets.add(metrics);
 
-    // Reset per-set counters
     _greenFrames = 0;
     _totalFrames = 0;
     _tutMs = 0;
     _tutZoneEnteredAt = null;
     _currentRepDurations.clear();
-
     setState(() {});
 
-    // Show coaching sheet — "Continue" either starts the next set or ends session
     showModalBottomSheet(
       context: context,
       isDismissible: false,
@@ -326,15 +431,10 @@ class _CameraViewState extends State<CameraView> {
         exerciseName: widget.exercise.name,
         metrics: metrics,
         onContinue: () {
-          Navigator.of(context).pop(); // dismiss sheet
+          Navigator.of(context).pop();
           if (_currentSet < _totalSets) {
-            setState(() {
-              _repCount = 0;
-              _currentSet++;
-              _sessionPaused = false;
-            });
+            _startRestCountdown();
           } else {
-            // All sets done — navigate to session summary (disposes camera)
             context.go(
               '/session/summary',
               extra: SessionSummaryData(
@@ -348,6 +448,41 @@ class _CameraViewState extends State<CameraView> {
     );
   }
 
+  /// 5-second between-set countdown. Rep counting stays paused; the overlay
+  /// counts down and the next set begins automatically (or the user skips).
+  void _startRestCountdown() {
+    final secs = widget.exercise.restBetweenSetsSec.clamp(3, 60);
+    setState(() {
+      _repCount = 0;
+      _currentSet++;
+      _restCountdown = secs;
+      _sessionPaused = true;
+    });
+    if (_ttsEnabled) _tts.speak('Rest. Next set in $secs seconds.');
+
+    _restTimer?.cancel();
+    _restTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return t.cancel();
+      final next = (_restCountdown ?? 1) - 1;
+      if (next <= 0) {
+        t.cancel();
+        _skipRest();
+      } else {
+        setState(() => _restCountdown = next);
+      }
+    });
+  }
+
+  void _skipRest() {
+    _restTimer?.cancel();
+    setState(() {
+      _restCountdown = null;
+      _sessionPaused = false;
+    });
+    if (_ttsEnabled) _tts.speak('Go!');
+    _beginSet();
+  }
+
   Future<void> _flipCamera() async {
     if (_cameras.length < 2) return;
     await _controller?.stopImageStream();
@@ -358,6 +493,8 @@ class _CameraViewState extends State<CameraView> {
 
   @override
   void dispose() {
+    _setTicker?.cancel();
+    _restTimer?.cancel();
     _controller?.stopImageStream();
     _controller?.dispose();
     _detector.close();
@@ -365,7 +502,7 @@ class _CameraViewState extends State<CameraView> {
     super.dispose();
   }
 
-  // ── Build ────────────────────────────────────────────────────────────────────
+  // ── Build ───────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -379,7 +516,7 @@ class _CameraViewState extends State<CameraView> {
     }
 
     final previewSize = _controller!.value.previewSize;
-    // previewSize comes in landscape; swap for portrait
+    // previewSize comes in landscape; portrait swap for the painter.
     final imageSize = previewSize != null
         ? Size(previewSize.height, previewSize.width)
         : Size.zero;
@@ -389,8 +526,13 @@ class _CameraViewState extends State<CameraView> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // ① FR-2.1: Live camera preview
-          CameraPreview(_controller!),
+          // ① FR-2.1: Camera preview — aspect-ratio-preserving cover fit so
+          //   the feed isn't stretched vertically on phones whose screen
+          //   aspect differs from the camera sensor (most do).
+          _CoverCameraPreview(
+            controller: _controller!,
+            imageSize: imageSize,
+          ),
 
           // ② FR-2.1: 33-landmark skeleton overlay
           if (_poses.isNotEmpty)
@@ -402,28 +544,33 @@ class _CameraViewState extends State<CameraView> {
               ),
             ),
 
-          // ③ HUD controls
+          // ③ HUD
           SafeArea(
             child: Column(
               children: [
                 _topBar(context),
-                Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 40, vertical: 8),
-                  // FR-2.2: Real-time form evaluation gauge
-                  child: FormGauge(
-                    angle: _currentAngle,
-                    minAngle: widget.exercise.targetAngleMin,
-                    maxAngle: widget.exercise.targetAngleMax,
-                    visible: _showGauge,
-                    onTap: () => setState(() => _showGauge = !_showGauge),
+                if (_sessionStarted) ...[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 40, vertical: 8),
+                    child: FormGauge(
+                      angle: _currentAngle,
+                      minAngle: widget.exercise.targetAngleMin,
+                      maxAngle: widget.exercise.targetAngleMax,
+                      visible: _showGauge,
+                      onTap: () => setState(() => _showGauge = !_showGauge),
+                    ),
                   ),
-                ),
-                const Spacer(),
-                _bottomPanel(),
+                  const Spacer(),
+                  _bottomPanel(),
+                ] else
+                  _gesturePrompt(),
               ],
             ),
           ),
+
+          // ④ Inter-set rest overlay
+          if (_restCountdown != null) _restOverlay(),
         ],
       ),
     );
@@ -431,27 +578,50 @@ class _CameraViewState extends State<CameraView> {
 
   Widget _topBar(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
       child: Row(
         children: [
-          IconButton(
-            icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-            onPressed: () => context.pop(),
+          _HudIcon(
+            icon: Icons.arrow_back_rounded,
+            onTap: () => context.pop(),
           ),
+          const SizedBox(width: 4),
           Expanded(
-            child: Text(
-              widget.exercise.name.toUpperCase(),
-              textAlign: TextAlign.center,
-              style: AppTextStyles.titleMedium.copyWith(
-                color: Colors.white,
-                letterSpacing: 2,
-              ),
+            child: Column(
+              children: [
+                Text(
+                  widget.exercise.name.toUpperCase(),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 2,
+                  ),
+                ),
+                if (_sessionStarted)
+                  Text(
+                    _formatDuration(_setElapsed),
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.75),
+                      fontSize: 12,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+              ],
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.flip_camera_android_rounded,
-                color: Colors.white),
-            onPressed: _flipCamera,
+          const SizedBox(width: 4),
+          _HudIcon(
+            icon: _ttsEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+            onTap: () {
+              setState(() => _ttsEnabled = !_ttsEnabled);
+              if (!_ttsEnabled) _tts.stop();
+            },
+          ),
+          const SizedBox(width: 4),
+          _HudIcon(
+            icon: Icons.flip_camera_android_rounded,
+            onTap: _flipCamera,
           ),
         ],
       ),
@@ -459,95 +629,240 @@ class _CameraViewState extends State<CameraView> {
   }
 
   Widget _bottomPanel() {
+    final cs = Theme.of(context).colorScheme;
     return Container(
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.65),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: AppColors.border),
+        color: Colors.black.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // FR-2.4: Rep count display
-          Text(
-            '$_repCount',
-            style: AppTextStyles.display.copyWith(
-              fontSize: 72,
-              color: Colors.white,
-            ),
-          ),
-          Text('reps', style: AppTextStyles.bodyMedium),
-
-          const SizedBox(height: 16),
-
-          // FR-2.4: Set progress dots
           Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(_totalSets, (i) {
-              final done = i < _currentSet - 1;
-              final active = i == _currentSet - 1;
-              return Container(
-                margin: const EdgeInsets.symmetric(horizontal: 5),
-                width: active ? 14 : 10,
-                height: active ? 14 : 10,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: done
-                      ? AppColors.secondary
-                      : active
-                          ? AppColors.primary
-                          : AppColors.border,
-                ),
-              );
-            }),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Set $_currentSet of $_totalSets',
-            style: AppTextStyles.caption,
-          ),
-
-          const SizedBox(height: 20),
-
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton(
-              onPressed: () => context.pop(),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.error,
-                side: const BorderSide(color: AppColors.error),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'REPS',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.6),
+                        fontSize: 11,
+                        letterSpacing: 1.6,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      '$_repCount / $_targetReps',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 32,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              child: const Text('STOP SESSION'),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    'SET',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.6),
+                      fontSize: 11,
+                      letterSpacing: 1.6,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Text(
+                    '$_currentSet / $_totalSets',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 32,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Rep progress bar
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: _repCount / _targetReps,
+              minHeight: 6,
+              backgroundColor: Colors.white.withValues(alpha: 0.12),
+              valueColor: AlwaysStoppedAnimation(cs.primary),
             ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => context.pop(),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: BorderSide(
+                        color: Colors.white.withValues(alpha: 0.3)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  icon: const Icon(Icons.stop_rounded, size: 18),
+                  label: const Text('END'),
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
+  Widget _gesturePrompt() {
+    final cs = Theme.of(context).colorScheme;
+    final holding = _gestureStartAt != null;
+    const shadow = Shadow(blurRadius: 10, color: Colors.black87);
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.back_hand_outlined,
+              size: 80,
+              color: holding ? cs.primary : Colors.white,
+              shadows: const [shadow],
+            ),
+            const SizedBox(height: 20),
+            Text(
+              holding ? 'Hold still…' : 'Show open hand to start',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                shadows: [shadow],
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 28),
+            if (holding)
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: cs.primary, width: 3),
+                  color: cs.primary.withValues(alpha: 0.25),
+                ),
+                child: Center(
+                  child: Text(
+                    '$_gestureCountdown',
+                    style: TextStyle(
+                      color: cs.primary,
+                      fontSize: 36,
+                      fontWeight: FontWeight.w800,
+                      shadows: const [shadow],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _restOverlay() {
+    final cs = Theme.of(context).colorScheme;
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withValues(alpha: 0.75),
+        child: SafeArea(
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'NEXT UP',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.7),
+                    fontSize: 12,
+                    letterSpacing: 2,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Set $_currentSet of $_totalSets',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 28),
+                Container(
+                  width: 160,
+                  height: 160,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: cs.primary, width: 4),
+                  ),
+                  child: Text(
+                    '${_restCountdown ?? 0}',
+                    style: TextStyle(
+                      color: cs.primary,
+                      fontSize: 72,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 28),
+                TextButton(
+                  onPressed: _skipRest,
+                  child: const Text(
+                    'Skip rest',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _permissionScreen() {
+    final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: AppColors.background,
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.camera_alt_outlined,
-                  color: AppColors.textMuted, size: 64),
+              Icon(Icons.camera_alt_outlined,
+                  color: cs.onSurface.withValues(alpha: 0.5), size: 64),
               const SizedBox(height: 24),
-              Text('Camera access needed', style: AppTextStyles.titleMedium),
+              Text(
+                'Camera access needed',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
               const SizedBox(height: 8),
               Text(
                 'FitForm needs the camera to track your form. Enable it in Settings.',
-                style: AppTextStyles.bodyMedium,
+                style: Theme.of(context).textTheme.bodyMedium,
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 24),
@@ -557,6 +872,64 @@ class _CameraViewState extends State<CameraView> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  String _formatDuration(Duration d) {
+    final mm = d.inMinutes.toString().padLeft(2, '0');
+    final ss = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$mm:$ss';
+  }
+}
+
+/// Camera preview wrapped in `FittedBox(BoxFit.cover)` so the sensor's native
+/// aspect ratio is preserved. The phone screen and sensor are rarely the same
+/// aspect — without this, `StackFit.expand` stretches the preview vertically.
+class _CoverCameraPreview extends StatelessWidget {
+  const _CoverCameraPreview({
+    required this.controller,
+    required this.imageSize,
+  });
+
+  final CameraController controller;
+  final Size imageSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRect(
+      child: SizedBox.expand(
+        child: FittedBox(
+          fit: BoxFit.cover,
+          child: SizedBox(
+            width: imageSize.width,
+            height: imageSize.height,
+            child: CameraPreview(controller),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Small dark-glass HUD icon button used along the top bar.
+class _HudIcon extends StatelessWidget {
+  const _HudIcon({required this.icon, required this.onTap});
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.4),
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Icon(icon, size: 20, color: Colors.white),
         ),
       ),
     );

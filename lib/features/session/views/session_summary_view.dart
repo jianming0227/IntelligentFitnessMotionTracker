@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,7 +5,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
-import '../../../services/gemini_service.dart';
+import '../../plan/controllers/plan_controller.dart';
+import '../../profile/models/user_profile_biometrics.dart';
+import '../../profile/providers/profile_providers.dart';
 import '../../train/models/set_metrics.dart';
 
 // Passed via GoRouter extra when navigating to /session/summary.
@@ -21,80 +21,62 @@ class SessionSummaryData {
   final List<SetMetrics> sets;
 }
 
-// FR-3.2: Session summary screen (Option B).
-// Shows a per-set breakdown table, then streams a Gemini full-session analysis
-// and personalised 3-day plan. "Save & Done" persists the plan and returns home.
+// FR-3.2: Session summary screen.
+// Shows the per-set breakdown table immediately, then triggers adaptive plan
+// generation via PlanController in the background. "View Your Plan" becomes
+// active once generation is complete (or failed).
 class SessionSummaryView extends ConsumerStatefulWidget {
   const SessionSummaryView({super.key, required this.data});
 
   final SessionSummaryData data;
 
   @override
-  ConsumerState<SessionSummaryView> createState() => _SessionSummaryViewState();
+  ConsumerState<SessionSummaryView> createState() =>
+      _SessionSummaryViewState();
 }
 
 class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
-  String _analysisText = '';
-  bool _analysisDone = false;
   bool _saving = false;
-  StreamSubscription<String>? _sub;
 
   @override
   void initState() {
     super.initState();
-    _startAnalysis();
+    _triggerPlanGeneration();
   }
 
-  Future<void> _startAnalysis() async {
+  Future<void> _triggerPlanGeneration() async {
     final prefs = await SharedPreferences.getInstance();
     final history = prefs.getStringList('session_history') ?? [];
 
-    _sub = ref
-        .read(geminiServiceProvider)
-        .streamSessionAnalysis(
+    // Use saved profile or fall back to defaults so plan generation always runs.
+    final profile =
+        ref.read(profileProvider).value ?? UserProfileBiometrics.defaults;
+
+    ref.read(planProvider.notifier).generateAdaptivePlan(
           exerciseName: widget.data.exerciseName,
           sets: widget.data.sets,
-          previousSessionSummaries: history,
-        )
-        .listen(
-          (chunk) => setState(() => _analysisText += chunk),
-          onDone: () => setState(() => _analysisDone = true),
-          onError: (_) => setState(() {
-            _analysisText =
-                'Great session! Your form and consistency will keep improving. Keep showing up!';
-            _analysisDone = true;
-          }),
+          biometrics: profile,
+          sessionHistory: history,
         );
   }
 
-  Future<void> _saveAndDone() async {
+  Future<void> _saveAndViewPlan() async {
     setState(() => _saving = true);
     final prefs = await SharedPreferences.getInstance();
-
-    // Append a text summary of this session to the running history
     final history = prefs.getStringList('session_history') ?? [];
     final summary =
         '${widget.data.exerciseName} — ${widget.data.sets.map((s) => s.toHistorySummary()).join(' | ')}';
     history.add(summary);
     await prefs.setStringList('session_history', history);
-
-    // Persist the generated plan so HomeView can display it
-    await prefs.setString('latest_plan', _analysisText);
-    await prefs.setString('latest_plan_exercise', widget.data.exerciseName);
-    await prefs.setString(
-        'latest_plan_date', DateTime.now().toIso8601String());
-
-    if (mounted) context.go('/home');
-  }
-
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
+    if (mounted) context.go('/plan');
   }
 
   @override
   Widget build(BuildContext context) {
+    final planAsync = ref.watch(planProvider);
+    final generating = planAsync.isLoading;
+    final canContinue = !generating && !_saving;
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -107,44 +89,19 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          // ── Per-set breakdown table ────────────────────────────────────────
+          // ── Per-set breakdown ─────────────────────────────────────────────
           Text('Set Breakdown', style: AppTextStyles.titleMedium),
           const SizedBox(height: 12),
           _SetTable(sets: widget.data.sets),
-
           const SizedBox(height: 28),
 
-          // ── Gemini analysis ───────────────────────────────────────────────
-          Row(
-            children: [
-              const Icon(Icons.auto_awesome, color: AppColors.primary, size: 18),
-              const SizedBox(width: 8),
-              Text('AI Coach Analysis', style: AppTextStyles.titleMedium),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: _analysisText.isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: Center(
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                : Text(_analysisText, style: AppTextStyles.bodyLarge),
-          ),
-
+          // ── AI plan status ────────────────────────────────────────────────
+          _PlanStatusBanner(planAsync: planAsync),
           const SizedBox(height: 32),
 
-          // ── Save button ───────────────────────────────────────────────────
+          // ── Continue button ───────────────────────────────────────────────
           ElevatedButton(
-            onPressed: (_analysisDone && !_saving) ? _saveAndDone : null,
+            onPressed: canContinue ? _saveAndViewPlan : null,
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.secondary,
               disabledBackgroundColor: AppColors.border,
@@ -155,9 +112,12 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
             child: Text(
               _saving
                   ? 'Saving…'
-                  : (_analysisDone ? 'Save & Done' : 'Generating Plan…'),
-              style: AppTextStyles.button
-                  .copyWith(color: AppColors.background),
+                  : generating
+                      ? 'Generating Plan…'
+                      : 'View Your Plan →',
+              style: AppTextStyles.button.copyWith(
+                color: canContinue ? AppColors.background : AppColors.textMuted,
+              ),
             ),
           ),
           const SizedBox(height: 24),
@@ -167,7 +127,61 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
   }
 }
 
-// ── Per-set breakdown table ────────────────────────────────────────────────────
+// Shows the plan generation status inline (loading / error / ready).
+class _PlanStatusBanner extends StatelessWidget {
+  const _PlanStatusBanner({required this.planAsync});
+
+  final AsyncValue<Map<String, dynamic>?> planAsync;
+
+  @override
+  Widget build(BuildContext context) {
+    return planAsync.when(
+      loading: () => Row(
+        children: [
+          const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'AI Coach is building your adaptive plan…',
+              style: AppTextStyles.bodyMedium,
+            ),
+          ),
+        ],
+      ),
+      error: (_, _) => Row(
+        children: [
+          const Icon(Icons.warning_amber_rounded,
+              color: AppColors.error, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Plan generation failed — you can still save your session.',
+              style: AppTextStyles.bodyMedium,
+            ),
+          ),
+        ],
+      ),
+      data: (_) => Row(
+        children: [
+          const Icon(Icons.check_circle_outline_rounded,
+              color: AppColors.secondary, size: 18),
+          const SizedBox(width: 8),
+          Text(
+            'Adaptive plan ready!',
+            style: AppTextStyles.bodyMedium
+                .copyWith(color: AppColors.secondary),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Per-set breakdown table ───────────────────────────────────────────────────
 
 class _SetTable extends StatelessWidget {
   const _SetTable({required this.sets});
@@ -185,12 +199,11 @@ class _SetTable extends StatelessWidget {
       child: Column(
         children: [
           _TableRow(
-            set: 'SET',
-            reps: 'REPS',
-            form: 'FORM',
-            fatigue: 'FATIGUE',
-            isHeader: true,
-          ),
+              set: 'SET',
+              reps: 'REPS',
+              form: 'FORM',
+              fatigue: 'FATIGUE',
+              isHeader: true),
           const Divider(color: AppColors.border, height: 1),
           ...sets.asMap().entries.map((e) {
             final s = e.value;
@@ -222,51 +235,36 @@ class _TableRow extends StatelessWidget {
     this.isHeader = false,
   });
 
-  final String set;
-  final String reps;
-  final String form;
-  final String fatigue;
+  final String set, reps, form, fatigue;
   final bool isHeader;
 
   @override
   Widget build(BuildContext context) {
-    final baseStyle =
-        isHeader ? AppTextStyles.caption : AppTextStyles.bodyMedium;
+    final base = isHeader ? AppTextStyles.caption : AppTextStyles.bodyMedium;
+    final muted = isHeader ? AppColors.textMuted : AppColors.textPrimary;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       child: Row(
         children: [
           Expanded(
-            child: Text(set,
-                style: baseStyle.copyWith(
-                    color: isHeader
-                        ? AppColors.textMuted
-                        : AppColors.textPrimary),
-                textAlign: TextAlign.center),
-          ),
+              child: Text(set,
+                  style: base.copyWith(color: muted),
+                  textAlign: TextAlign.center)),
           Expanded(
-            child: Text(reps,
-                style: baseStyle.copyWith(
-                    color: isHeader
-                        ? AppColors.textMuted
-                        : AppColors.textPrimary),
-                textAlign: TextAlign.center),
-          ),
+              child: Text(reps,
+                  style: base.copyWith(color: muted),
+                  textAlign: TextAlign.center)),
           Expanded(
-            child: Text(form,
-                style: baseStyle.copyWith(
-                    color: isHeader ? AppColors.textMuted : _formColor(form)),
-                textAlign: TextAlign.center),
-          ),
+              child: Text(form,
+                  style: base.copyWith(
+                      color: isHeader ? muted : _formColor(form)),
+                  textAlign: TextAlign.center)),
           Expanded(
-            child: Text(fatigue,
-                style: baseStyle.copyWith(
-                    color: isHeader
-                        ? AppColors.textMuted
-                        : _fatigueColor(fatigue)),
-                textAlign: TextAlign.center),
-          ),
+              child: Text(fatigue,
+                  style: base.copyWith(
+                      color: isHeader ? muted : _fatigueColor(fatigue)),
+                  textAlign: TextAlign.center)),
         ],
       ),
     );
