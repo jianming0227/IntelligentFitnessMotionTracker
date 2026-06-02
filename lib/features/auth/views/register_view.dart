@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_text_styles.dart';
+
 import '../providers/auth_providers.dart';
+import '../widgets/auth_scaffold.dart';
 
 class RegisterView extends ConsumerStatefulWidget {
   const RegisterView({super.key});
@@ -18,6 +18,12 @@ class _RegisterViewState extends ConsumerState<RegisterView> {
   final _confirmController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
 
+  bool _obscurePassword = true;
+  bool _obscureConfirm = true;
+  String? _emailError;
+  String? _passwordError;
+  String? _confirmError;
+
   @override
   void dispose() {
     _emailController.dispose();
@@ -26,149 +32,129 @@ class _RegisterViewState extends ConsumerState<RegisterView> {
     super.dispose();
   }
 
-  Future<void> _handleRegister() async {
-    if (!_formKey.currentState!.validate()) return;
+  String? _validateEmail(String v) {
+    if (v.isEmpty) return 'Email is required';
+    if (!v.contains('@')) return 'You have entered an invalid email address!';
+    return null;
+  }
 
-    await ref
-        .read(authControllerProvider.notifier)
-        .signUp(
-          email: _emailController.text.trim(),
+  String? _validatePassword(String v) {
+    if (v.isEmpty) return 'Password is required';
+    if (v.length < 6) return 'Min 6 characters';
+    return null;
+  }
+
+  Future<void> _handleRegister() async {
+    setState(() {
+      _emailError = _validateEmail(_emailController.text.trim());
+      _passwordError = _validatePassword(_passwordController.text);
+      _confirmError = _confirmController.text == _passwordController.text
+          ? null
+          : 'Passwords do not match';
+    });
+    if (_emailError != null ||
+        _passwordError != null ||
+        _confirmError != null) {
+      return;
+    }
+
+    final email = _emailController.text.trim();
+    await ref.read(authControllerProvider.notifier).signUp(
+          email: email,
           password: _passwordController.text,
         );
+
+    // Supabase's default flow sends a confirmation email and keeps the
+    // session null until the link is clicked. Tell the user to go check it.
+    if (!mounted) return;
+    final hadError = ref.read(authControllerProvider).hasError;
+    if (hadError) return;
+
+    final cs = Theme.of(context).colorScheme;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          backgroundColor: cs.surfaceContainerHighest,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 5),
+          content: Row(
+            children: [
+              Icon(Icons.mark_email_read_outlined, color: cs.primary),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Confirmation email sent to $email — tap the link to '
+                  'activate your account.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+    // Bounce to Login so the user knows where to return after confirming.
+    context.go('/login');
   }
 
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(authControllerProvider);
 
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/login'),
-        ),
-      ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Form(
-            key: _formKey,
-            child: SingleChildScrollView(
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                const SizedBox(height: 25),
-                Text(
-                  'Create Account',
-                  style: AppTextStyles.titleLarge,
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  'Start tracking your training journey.',
-                  style: AppTextStyles.bodyMedium,
-                ),
-
-                const SizedBox(height: 40),
-
-                TextFormField(
-                  controller: _emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                    labelText: 'Email',
-                    hintText: 'you@example.com',
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Email is required';
-                    }
-                    if (!value.contains('@')) return 'Enter a valid email';
-                    return null;
-                  },
-                ),
-
-                const SizedBox(height: 16),
-
-                TextFormField(
-                  controller: _passwordController,
-                  obscureText: true,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(labelText: 'Password'),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Password is required';
-                    }
-                    if (value.length < 6) return 'Min 6 characters';
-                    return null;
-                  },
-                ),
-
-                const SizedBox(height: 16),
-
-                TextFormField(
-                  controller: _confirmController,
-                  obscureText: true,
-                  textInputAction: TextInputAction.done,
-                  decoration: const InputDecoration(
-                    labelText: 'Confirm password',
-                  ),
-                  validator: (value) {
-                    if (value != _passwordController.text) {
-                      return 'Passwords do not match';
-                    }
-                    return null;
-                  },
-                  onFieldSubmitted: (_) => _handleRegister(),
-                ),
-
-                const SizedBox(height: 24),
-
-                ElevatedButton(
-                  onPressed: authState.isLoading ? null : _handleRegister,
-                  child: authState.isLoading
-                      ? const SizedBox(
-                          height: 22,
-                          width: 22,
-                          child: CircularProgressIndicator(
-                            color: AppColors.textPrimary,
-                            strokeWidth: 2.5,
-                          ),
-                        )
-                      : const Text('Create account'),
-                ),
-
-                const SizedBox(height: 16),
-
-                if (authState.hasError)
-                  Text(
-                    authState.error.toString(),
-                    style: AppTextStyles.bodyMedium.copyWith(
-                      color: AppColors.error,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-
-                const SizedBox(height: 48),
-
-                Center(
-                  child: TextButton(
-                    onPressed: () => context.go('/login'),
-                    child: Text(
-                      'Already have an account? Log in',
-                      style: AppTextStyles.bodyMedium.copyWith(
-                        color: AppColors.primary,
-                      ),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 24),
-              ],
-            ),
+    return Form(
+      key: _formKey,
+      child: AuthScaffold(
+        activeTab: 'signup',
+        heading: const Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(text: 'Hello '),
+              TextSpan(
+                text: 'newbie',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+              TextSpan(text: ','),
+            ],
           ),
         ),
-        ),
+        subtitle: 'Enter your information below or sign up with another '
+            'account.',
+        fields: [
+          AuthField(
+            label: 'Email',
+            controller: _emailController,
+            keyboardType: TextInputType.emailAddress,
+            textInputAction: TextInputAction.next,
+            hint: 'you@example.com',
+            errorText: _emailError,
+          ),
+          AuthField(
+            label: 'Password',
+            controller: _passwordController,
+            obscureText: _obscurePassword,
+            isPassword: true,
+            onTogglePassword: () =>
+                setState(() => _obscurePassword = !_obscurePassword),
+            textInputAction: TextInputAction.next,
+            errorText: _passwordError,
+          ),
+          AuthField(
+            label: 'Password again',
+            controller: _confirmController,
+            obscureText: _obscureConfirm,
+            isPassword: true,
+            onTogglePassword: () =>
+                setState(() => _obscureConfirm = !_obscureConfirm),
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _handleRegister(),
+            errorText: _confirmError,
+          ),
+        ],
+        primaryLabel: 'Sign up',
+        loading: authState.isLoading,
+        onPrimary: _handleRegister,
+        error: authState.hasError ? authState.error.toString() : null,
       ),
     );
   }
