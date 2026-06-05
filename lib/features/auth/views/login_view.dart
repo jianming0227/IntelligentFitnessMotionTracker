@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../core/providers/demo_mode_provider.dart';
 import '../providers/auth_providers.dart';
 import '../widgets/auth_scaffold.dart';
 
@@ -118,6 +120,12 @@ class _LoginViewState extends ConsumerState<LoginView> {
         loading: authState.isLoading,
         onPrimary: _handleLogin,
         error: authState.hasError ? authState.error.toString() : null,
+        demoOnTap: () async {
+          await seedDemoData();
+          ref.read(demoModeProvider.notifier).state = true;
+          // ignore: use_build_context_synchronously
+          context.go('/home');
+        },
       ),
     );
   }

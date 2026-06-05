@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/providers/demo_mode_provider.dart';
 import '../features/auth/views/login_view.dart';
 import '../features/auth/views/register_view.dart';
 import '../features/home/views/home_view.dart';
@@ -42,6 +43,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       Supabase.instance.client.auth.onAuthStateChange,
     ),
     redirect: (context, state) {
+      // Demo mode bypasses all auth checks — local data only.
+      final isDemo = ref.read(demoModeProvider);
+      if (isDemo) return null;
+
       final isLoggedIn =
           Supabase.instance.client.auth.currentSession != null;
       final loc = state.matchedLocation;

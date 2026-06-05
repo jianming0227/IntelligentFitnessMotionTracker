@@ -1,17 +1,23 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/user_profile_biometrics.dart';
 
-// FR-1.2: Persists and exposes the user's biometric profile. Returns null
-// until the survey has been completed at least once.
+// FR-1.2: Persists and exposes the user's biometric profile, keyed by Supabase
+// user ID so multiple accounts on the same device stay fully isolated.
+// Returns null until the survey has been completed at least once.
 class ProfileController extends AsyncNotifier<UserProfileBiometrics?> {
-  static const _keyGender = 'profile_gender';
-  static const _keyAge = 'profile_age';
-  static const _keyHeight = 'profile_height_cm';
-  static const _keyWeight = 'profile_weight_kg';
-  static const _keyGoal = 'profile_fitness_goal';
-  static const _keyLevel = 'profile_experience_level';
+  // Returns the current user's UID, or 'demo' in offline/demo mode.
+  String get _uid =>
+      Supabase.instance.client.auth.currentUser?.id ?? 'demo';
+
+  String get _keyGender => '${_uid}_profile_gender';
+  String get _keyAge => '${_uid}_profile_age';
+  String get _keyHeight => '${_uid}_profile_height_cm';
+  String get _keyWeight => '${_uid}_profile_weight_kg';
+  String get _keyGoal => '${_uid}_profile_fitness_goal';
+  String get _keyLevel => '${_uid}_profile_experience_level';
 
   @override
   Future<UserProfileBiometrics?> build() async {
@@ -22,12 +28,8 @@ class ProfileController extends AsyncNotifier<UserProfileBiometrics?> {
     final w = prefs.getDouble(_keyWeight);
     final g = prefs.getString(_keyGoal);
     final l = prefs.getString(_keyLevel);
-    if (gender == null ||
-        age == null ||
-        h == null ||
-        w == null ||
-        g == null ||
-        l == null) {
+    if (gender == null || age == null || h == null ||
+        w == null || g == null || l == null) {
       return null;
     }
     return UserProfileBiometrics(

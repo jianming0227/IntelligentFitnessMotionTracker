@@ -16,6 +16,7 @@ class AuthScaffold extends StatelessWidget {
     required this.onPrimary,
     required this.loading,
     required this.error,
+    this.demoOnTap,
   });
 
   /// `'login'` or `'signup'` — drives which tab shows the accent underline.
@@ -27,6 +28,8 @@ class AuthScaffold extends StatelessWidget {
   final VoidCallback onPrimary;
   final bool loading;
   final String? error;
+  /// If provided, renders a small "Demo mode" link below the action row.
+  final VoidCallback? demoOnTap;
 
   @override
   Widget build(BuildContext context) {
@@ -147,6 +150,21 @@ class AuthScaffold extends StatelessWidget {
                     onPrimary: onPrimary,
                     loading: loading,
                   ),
+                  if (demoOnTap != null) ...[
+                    const SizedBox(height: 12),
+                    Center(
+                      child: TextButton(
+                        onPressed: demoOnTap,
+                        child: Text(
+                          'Demo mode (offline)',
+                          style: tt.bodyMedium?.copyWith(
+                            color: cs.onSurface.withValues(alpha: 0.45),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                   SizedBox(height: MediaQuery.of(context).padding.bottom + 8),
                 ],
               ),

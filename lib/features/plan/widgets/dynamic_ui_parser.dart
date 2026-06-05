@@ -6,9 +6,18 @@ import '../../train/models/exercise.dart';
 
 /// Decodes a Gemini-generated JSON map into native Flutter widgets.
 /// Supports two node types: WorkoutPlanView (top-level) and SessionCard.
-Widget buildDynamicWidget(Map<String, dynamic> jsonNode, BuildContext context) {
+Widget buildDynamicWidget(
+  Map<String, dynamic> jsonNode,
+  BuildContext context, {
+  VoidCallback? onRefresh,
+  bool isLoading = false,
+}) {
   return switch (jsonNode['type'] as String? ?? '') {
-    'WorkoutPlanView' => _WorkoutPlanView(node: jsonNode),
+    'WorkoutPlanView' => _WorkoutPlanView(
+        node: jsonNode,
+        onRefresh: onRefresh,
+        isLoading: isLoading,
+      ),
     'SessionCard' => _SessionCard(node: jsonNode),
     _ => const SizedBox.shrink(),
   };
@@ -17,8 +26,14 @@ Widget buildDynamicWidget(Map<String, dynamic> jsonNode, BuildContext context) {
 // ── WorkoutPlanView ───────────────────────────────────────────────────────────
 
 class _WorkoutPlanView extends StatelessWidget {
-  const _WorkoutPlanView({required this.node});
+  const _WorkoutPlanView({
+    required this.node,
+    this.onRefresh,
+    this.isLoading = false,
+  });
   final Map<String, dynamic> node;
+  final VoidCallback? onRefresh;
+  final bool isLoading;
 
   @override
   Widget build(BuildContext context) {
@@ -70,9 +85,30 @@ class _WorkoutPlanView extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 20),
-        Text(
-          'Your Schedule',
-          style: tt.titleMedium,
+        Row(
+          children: [
+            Text('Your Schedule', style: tt.titleMedium),
+            const Spacer(),
+            SizedBox(
+              width: 36,
+              height: 36,
+              child: isLoading
+                  ? Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: cs.primary,
+                      ),
+                    )
+                  : IconButton(
+                      padding: EdgeInsets.zero,
+                      icon: Icon(Icons.refresh_rounded,
+                          color: cs.primary, size: 22),
+                      tooltip: 'Refresh plan',
+                      onPressed: onRefresh,
+                    ),
+            ),
+          ],
         ),
         const SizedBox(height: 14),
         ...sessions.map(

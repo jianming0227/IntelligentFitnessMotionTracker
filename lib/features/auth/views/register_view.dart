@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../providers/auth_providers.dart';
 import '../widgets/auth_scaffold.dart';
@@ -58,44 +57,10 @@ class _RegisterViewState extends ConsumerState<RegisterView> {
       return;
     }
 
-    final email = _emailController.text.trim();
     await ref.read(authControllerProvider.notifier).signUp(
-          email: email,
+          email: _emailController.text.trim(),
           password: _passwordController.text,
         );
-
-    // Supabase's default flow sends a confirmation email and keeps the
-    // session null until the link is clicked. Tell the user to go check it.
-    if (!mounted) return;
-    final hadError = ref.read(authControllerProvider).hasError;
-    if (hadError) return;
-
-    final cs = Theme.of(context).colorScheme;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          backgroundColor: cs.surfaceContainerHighest,
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 5),
-          content: Row(
-            children: [
-              Icon(Icons.mark_email_read_outlined, color: cs.primary),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Confirmation email sent to $email — tap the link to '
-                  'activate your account.',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-
-    // Bounce to Login so the user knows where to return after confirming.
-    context.go('/login');
   }
 
   @override

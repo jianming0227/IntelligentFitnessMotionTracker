@@ -81,6 +81,17 @@ class _CameraViewState extends State<CameraView> {
   // ── UI ──────────────────────────────────────────────────────────────────────
   bool _showGauge = true;
 
+  // ── Pre-session body detection gate ─────────────────────────────────────────
+  // Phase 1: user must step back until key landmarks are confident.
+  // Phase 2: body confirmed → hand gesture prompt unlocks.
+  bool _bodyInFrame = false;
+  bool _bodyTtsSpoken = false; // prevents repeating "show hand" on re-entry
+
+  // ── Mid-session body tracking ────────────────────────────────────────────────
+  // True whenever the key joints drop below confidence during an active set.
+  // Rep counting and form scoring are gated on this being false.
+  bool _bodyLostDuringSession = false;
+
   // ────────────────────────────────────────────────────────────────────────────
 
   @override
@@ -110,7 +121,7 @@ class _CameraViewState extends State<CameraView> {
     await _startController();
     Future.delayed(const Duration(milliseconds: 800), () {
       if (mounted && _ttsEnabled) {
-        _tts.speak('Show your open hand to start the session');
+        _tts.speak('Stand back from the phone so your full body is visible');
       }
     });
   }
@@ -140,26 +151,50 @@ class _CameraViewState extends State<CameraView> {
       if (!mounted) return;
 
       double? angle;
-      if (poses.isNotEmpty) {
-        if (!_sessionStarted) {
-          _checkGesture(poses.first);
+      if (!_sessionStarted) {
+        // Pre-session: gate on poses being detected at all.
+        if (poses.isNotEmpty) {
+          _checkBodyInFrame(poses.first);
+          if (_bodyInFrame) {
+            _checkGesture(poses.first);
+          } else {
+            _gestureStartAt = null;
+            _gestureCountdown = 3;
+          }
+        }
+      } else {
+        // Active session: must process even when poses is empty so that body-
+        // loss is detected (angle == null) and the overlay shows correctly.
+        final pose = poses.isNotEmpty ? poses.first : null;
+        angle = pose != null ? _jointAngle(pose) : null;
+
+        if (angle != null) {
+          // Body confirmed — clear lost state on transition.
+          if (_bodyLostDuringSession) {
+            setState(() => _bodyLostDuringSession = false);
+          }
+          _totalFrames++;
+          final inZone = angle >= widget.exercise.targetAngleMin &&
+              angle <= widget.exercise.targetAngleMax;
+          if (inZone) {
+            _greenFrames++;
+            final now = DateTime.now();
+            _tutZoneEnteredAt ??= now;
+            _tutMs += now.difference(_tutZoneEnteredAt!).inMilliseconds;
+            _tutZoneEnteredAt = now;
+          } else {
+            _tutZoneEnteredAt = null;
+          }
+          _checkBadForm(angle);
+          _countRep(angle);
         } else {
-          angle = _jointAngle(poses.first);
-          if (angle != null) {
-            _totalFrames++;
-            final inZone = angle >= widget.exercise.targetAngleMin &&
-                angle <= widget.exercise.targetAngleMax;
-            if (inZone) {
-              _greenFrames++;
-              final now = DateTime.now();
-              _tutZoneEnteredAt ??= now;
-              _tutMs += now.difference(_tutZoneEnteredAt!).inMilliseconds;
-              _tutZoneEnteredAt = now;
-            } else {
-              _tutZoneEnteredAt = null;
+          // Body lost or low-confidence — pause tracking, notify once per event.
+          _tutZoneEnteredAt = null;
+          if (!_bodyLostDuringSession) {
+            _bodyLostDuringSession = true;
+            if (_ttsEnabled) {
+              _tts.speak('Step back. Keep your full body visible to continue');
             }
-            _checkBadForm(angle);
-            _countRep(angle);
           }
         }
       }
@@ -231,6 +266,25 @@ class _CameraViewState extends State<CameraView> {
     _lastMotivationAt = now;
     const cues = ['Great form!', 'Keep it up!', 'Looking strong!', 'Perfect pace!'];
     _tts.speak(cues[now.second % cues.length]);
+  }
+
+  // ── Body-in-frame gate ──────────────────────────────────────────────────────
+  void _checkBodyInFrame(Pose pose) {
+    // Reuse the same confidence-gated angle check: if the exercise-specific
+    // joints (knee for squat, elbow for curl) are all confident, the user is
+    // standing far enough back for the full movement to be tracked.
+    final inFrame = _jointAngle(pose) != null;
+
+    if (inFrame && !_bodyTtsSpoken) {
+      _bodyTtsSpoken = true;
+      if (_ttsEnabled) {
+        _tts.speak('Full body detected. Show your open hand to start');
+      }
+    }
+
+    if (inFrame != _bodyInFrame) {
+      setState(() => _bodyInFrame = inFrame);
+    }
   }
 
   // ── Joint angles + landmark confidence ──────────────────────────────────────
@@ -569,7 +623,12 @@ class _CameraViewState extends State<CameraView> {
             ),
           ),
 
-          // ④ Inter-set rest overlay
+          // ④ Body-lost warning — shown mid-session when landmarks drop below
+          //    confidence. Rest overlay takes priority if both somehow coincide.
+          if (_sessionStarted && _bodyLostDuringSession && _restCountdown == null)
+            _bodyLostOverlay(),
+
+          // ⑤ Inter-set rest overlay
           if (_restCountdown != null) _restOverlay(),
         ],
       ),
@@ -728,8 +787,55 @@ class _CameraViewState extends State<CameraView> {
 
   Widget _gesturePrompt() {
     final cs = Theme.of(context).colorScheme;
-    final holding = _gestureStartAt != null;
     const shadow = Shadow(blurRadius: 10, color: Colors.black87);
+
+    // ── Phase 1: body not yet confirmed ──────────────────────────────────────
+    if (!_bodyInFrame) {
+      return Expanded(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 40),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.accessibility_new_rounded,
+                size: 80,
+                color: Colors.white.withValues(alpha: 0.85),
+                shadows: const [shadow],
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'Step back from the phone',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  shadows: [shadow],
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Make sure your full body is visible\nso the AI can track your form',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.7),
+                  fontSize: 14,
+                  height: 1.5,
+                  shadows: const [shadow],
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 28),
+              // Pulsing indicator to show the camera is actively scanning
+              _ScanningDot(color: cs.primary),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // ── Phase 2: body confirmed, waiting for hand gesture ────────────────────
+    final holding = _gestureStartAt != null;
     return Expanded(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 40),
@@ -776,6 +882,63 @@ class _CameraViewState extends State<CameraView> {
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _bodyLostOverlay() {
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withValues(alpha: 0.55),
+        child: SafeArea(
+          child: Center(
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 32),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.82),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(
+                  color: Colors.orange.withValues(alpha: 0.7),
+                  width: 1.5,
+                ),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.accessibility_new_rounded,
+                    color: Colors.orange,
+                    size: 56,
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Full body not detected',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Step back so your full body is\nvisible to resume tracking',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.72),
+                      fontSize: 14,
+                      height: 1.5,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 20),
+                  const _ScanningDot(color: Colors.orange),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -908,6 +1071,70 @@ class _CoverCameraPreview extends StatelessWidget {
             child: CameraPreview(controller),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Pulsing dot shown during Phase 1 to indicate the camera is actively
+/// scanning for the user's body landmarks.
+class _ScanningDot extends StatefulWidget {
+  const _ScanningDot({required this.color});
+  final Color color;
+
+  @override
+  State<_ScanningDot> createState() => _ScanningDotState();
+}
+
+class _ScanningDotState extends State<_ScanningDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+    _anim = Tween<double>(begin: 0.3, end: 1.0).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _anim,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: widget.color,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            'Scanning…',
+            style: TextStyle(
+              color: widget.color,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1,
+            ),
+          ),
+        ],
       ),
     );
   }

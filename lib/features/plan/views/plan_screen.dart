@@ -41,28 +41,16 @@ class PlanScreen extends ConsumerWidget {
                     _ErrorView(error: err, onRetry: () => _refresh(ref)),
                 data: (json) => json == null || json.isEmpty
                     ? const _EmptyView()
-                    : buildDynamicWidget(json, context),
+                    : buildDynamicWidget(
+                        json,
+                        context,
+                        onRefresh: isLoading ? null : () => _refresh(ref),
+                        isLoading: isLoading,
+                      ),
               ),
             ),
           ],
         ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor:
-            isLoading ? cs.surfaceContainerHighest : cs.primary,
-        foregroundColor: cs.onPrimary,
-        tooltip: 'Refresh plan',
-        onPressed: isLoading ? null : () => _refresh(ref),
-        child: isLoading
-            ? SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: cs.onPrimary,
-                ),
-              )
-            : const Icon(Icons.refresh_rounded),
       ),
     );
   }
