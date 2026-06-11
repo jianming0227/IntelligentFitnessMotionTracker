@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../services/supabase_service.dart';
 import '../models/user_profile_biometrics.dart';
 
 // FR-1.2: Persists and exposes the user's biometric profile, keyed by Supabase
@@ -28,18 +29,39 @@ class ProfileController extends AsyncNotifier<UserProfileBiometrics?> {
     final w = prefs.getDouble(_keyWeight);
     final g = prefs.getString(_keyGoal);
     final l = prefs.getString(_keyLevel);
-    if (gender == null || age == null || h == null ||
-        w == null || g == null || l == null) {
-      return null;
+
+    if (gender != null && age != null && h != null && w != null &&
+        g != null && l != null) {
+      return UserProfileBiometrics(
+        gender: gender, age: age, heightCm: h,
+        weightKg: w, fitnessGoal: g, experienceLevel: l,
+      );
     }
-    return UserProfileBiometrics(
-      gender: gender,
-      age: age,
-      heightCm: h,
-      weightKg: w,
-      fitnessGoal: g,
-      experienceLevel: l,
-    );
+
+    // Local cache empty — try fetching from Supabase (new device / reinstall).
+    try {
+      final row = await SupabaseService().fetchProfile();
+      if (row != null) {
+        final profile = UserProfileBiometrics(
+          gender: (row['gender'] as String?) ?? 'Male',
+          age: (row['age'] as int?) ?? 25,
+          heightCm: (row['height_cm'] as num?)?.toDouble() ?? 170,
+          weightKg: (row['weight_kg'] as num?)?.toDouble() ?? 70,
+          fitnessGoal: (row['goal'] as String?) ?? 'Get fitter',
+          experienceLevel: (row['experience_level'] as String?) ?? 'Beginner',
+        );
+        // Populate local cache so next launch is instant.
+        await prefs.setString(_keyGender, profile.gender);
+        await prefs.setInt(_keyAge, profile.age);
+        await prefs.setDouble(_keyHeight, profile.heightCm);
+        await prefs.setDouble(_keyWeight, profile.weightKg);
+        await prefs.setString(_keyGoal, profile.fitnessGoal);
+        await prefs.setString(_keyLevel, profile.experienceLevel);
+        return profile;
+      }
+    } catch (_) {}
+
+    return null;
   }
 
   Future<void> save({
@@ -65,6 +87,25 @@ class ProfileController extends AsyncNotifier<UserProfileBiometrics?> {
       fitnessGoal: fitnessGoal,
       experienceLevel: experienceLevel,
     ));
+
+    // Best-effort remote sync — failures never rethrown.
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid != null) {
+      try {
+        await SupabaseService().upsertProfile(
+          userId: uid,
+          gender: gender,
+          age: age,
+          heightCm: heightCm,
+          weightKg: weightKg,
+          fitnessGoal: fitnessGoal,
+          experienceLevel: experienceLevel,
+        );
+      } catch (e) {
+        // ignore: avoid_print
+        print('[ProfileController] Supabase upsert failed: $e');
+      }
+    }
   }
 }
 

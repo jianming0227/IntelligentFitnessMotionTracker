@@ -27,10 +27,24 @@ class _BiometricSurveyViewState extends ConsumerState<BiometricSurveyView> {
   int _age = 25;
   double _weightKg = 60;
   int _heightCm = 170;
-  String _goal = UserProfileBiometrics.goals[1]; // 'Get fitter'
-  String _level = UserProfileBiometrics.levels[2]; // 'Intermediate'
+  String _goal = UserProfileBiometrics.goals[1];
+  String _level = UserProfileBiometrics.levels[2];
 
   static const _stepCount = 6;
+
+  @override
+  void initState() {
+    super.initState();
+    final existing = ref.read(profileProvider).value;
+    if (existing != null) {
+      _gender = existing.gender;
+      _age = existing.age;
+      _weightKg = existing.weightKg;
+      _heightCm = existing.heightCm.round();
+      _goal = existing.fitnessGoal;
+      _level = existing.experienceLevel;
+    }
+  }
 
   @override
   void dispose() {

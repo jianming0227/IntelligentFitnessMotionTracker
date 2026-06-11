@@ -81,9 +81,9 @@ class Exercise {
       // Elbow angle interpretation:
       //   ~170° = arm fully extended (rep "bottom"), ~40° = curled (rep "top").
       targetAngleMin: 30,
-      targetAngleMax: 60,
+      targetAngleMax: 100,
       repBottomAngleStrict: 162, // arm must straighten past this
-      repTopAngleStrict: 55,     // arm must curl past this
+      repTopAngleStrict: 40,     // arm must curl past this
       minRepDurationMs: 600,
     ),
   ];

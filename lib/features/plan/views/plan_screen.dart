@@ -30,6 +30,13 @@ class PlanScreen extends ConsumerWidget {
                 children: [
                   Text('Schedule', style: tt.titleLarge),
                   const Spacer(),
+                  if (planAsync.value != null && !isLoading)
+                    IconButton(
+                      icon: Icon(Icons.delete_outline_rounded,
+                          color: cs.error, size: 22),
+                      tooltip: 'Delete plan',
+                      onPressed: () => _confirmDelete(context, ref),
+                    ),
                   Icon(Icons.auto_awesome, color: cs.primary, size: 20),
                 ],
               ),
@@ -59,6 +66,29 @@ class PlanScreen extends ConsumerWidget {
     final biometrics =
         ref.read(profileProvider).value ?? UserProfileBiometrics.defaults;
     ref.read(planProvider.notifier).refreshPlan(biometrics: biometrics);
+  }
+
+  Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Delete Plan'),
+        content: const Text(
+            'This removes your current plan from all devices. Complete a session to generate a new one.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Delete',
+                  style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      ref.read(planProvider.notifier).clearPlan();
+    }
   }
 }
 

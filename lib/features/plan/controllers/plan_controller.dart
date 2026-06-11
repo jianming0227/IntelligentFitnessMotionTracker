@@ -95,6 +95,18 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
     );
   }
 
+  Future<void> clearPlan() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyPlan);
+    await prefs.remove(_keyLastExercise);
+    try {
+      await ref.read(supabaseServiceProvider).deletePlan();
+    } catch (e) {
+      debugPrint('[PlanController] Supabase delete skipped: $e');
+    }
+    state = const AsyncValue.data(null);
+  }
+
   Future<void> _writeJsonFile(String jsonString) async {
     try {
       final dir = await getApplicationDocumentsDirectory();

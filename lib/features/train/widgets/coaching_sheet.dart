@@ -181,11 +181,15 @@ class _MetricChip extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              value.isEmpty ? label : value,
-              style: AppTextStyles.titleMedium.copyWith(
-                color: highlight ? AppColors.primary : AppColors.textPrimary,
-                fontSize: 14,
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                value.isEmpty ? label : value,
+                style: AppTextStyles.titleMedium.copyWith(
+                  color: highlight ? AppColors.primary : AppColors.textPrimary,
+                  fontSize: 14,
+                ),
+                maxLines: 1,
               ),
             ),
             if (value.isNotEmpty)

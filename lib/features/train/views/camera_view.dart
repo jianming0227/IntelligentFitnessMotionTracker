@@ -37,7 +37,6 @@ class _CameraViewState extends State<CameraView> {
   );
   bool _isDetecting = false;
   List<Pose> _poses = [];
-  double? _currentAngle;
 
   // ── FR-2.4: Rep counter state ───────────────────────────────────────────────
   bool _isDown = false;
@@ -80,6 +79,7 @@ class _CameraViewState extends State<CameraView> {
 
   // ── UI ──────────────────────────────────────────────────────────────────────
   bool _showGauge = true;
+  double? _currentAngle;
 
   // ── Pre-session body detection gate ─────────────────────────────────────────
   // Phase 1: user must step back until key landmarks are confident.
@@ -88,9 +88,15 @@ class _CameraViewState extends State<CameraView> {
   bool _bodyTtsSpoken = false; // prevents repeating "show hand" on re-entry
 
   // ── Mid-session body tracking ────────────────────────────────────────────────
-  // True whenever the key joints drop below confidence during an active set.
-  // Rep counting and form scoring are gated on this being false.
   bool _bodyLostDuringSession = false;
+
+  // ── User gesture pause ───────────────────────────────────────────────────────
+  // Raised open-hand (high five) held for 2 s pauses/resumes the active set.
+  // Distinct from _sessionPaused which covers coaching sheets and rest overlays.
+  bool _userPaused = false;
+  DateTime? _pauseGestureAt;
+  int _pauseGestureCountdown = 2;
+  Duration _setElapsedSnapshot = Duration.zero;
 
   // ────────────────────────────────────────────────────────────────────────────
 
@@ -168,7 +174,10 @@ class _CameraViewState extends State<CameraView> {
         final pose = poses.isNotEmpty ? poses.first : null;
         angle = pose != null ? _jointAngle(pose) : null;
 
-        if (angle != null) {
+        if (_userPaused) {
+          // Paused — only watch for the resume high-five gesture.
+          if (pose != null) _checkPauseGesture(pose);
+        } else if (angle != null) {
           // Body confirmed — clear lost state on transition.
           if (_bodyLostDuringSession) {
             setState(() => _bodyLostDuringSession = false);
@@ -187,6 +196,8 @@ class _CameraViewState extends State<CameraView> {
           }
           _checkBadForm(angle);
           _countRep(angle);
+          // Watch for pause gesture even while actively tracking.
+          if (pose != null) _checkPauseGesture(pose);
         } else {
           // Body lost or low-confidence — pause tracking, notify once per event.
           _tutZoneEnteredAt = null;
@@ -358,6 +369,96 @@ class _CameraViewState extends State<CameraView> {
         );
   }
 
+  // Wrist at or above shoulder level with open fingers — deliberate signal
+  // unlikely to fire during normal reps where the wrist stays below shoulder.
+  bool _isHighFive(Pose pose) {
+    bool highFive(
+      PoseLandmark? wrist,
+      PoseLandmark? shoulder,
+      PoseLandmark? thumb,
+      PoseLandmark? index,
+      PoseLandmark? pinky,
+    ) {
+      if (wrist == null ||
+          shoulder == null ||
+          thumb == null ||
+          index == null ||
+          pinky == null) { return false; }
+      // +30 px margin so the wrist only needs to reach near-shoulder height.
+      final handRaised = wrist.y < shoulder.y + 30;
+      final handOpen =
+          thumb.y < wrist.y && index.y < wrist.y && pinky.y < wrist.y;
+      return handRaised && handOpen;
+    }
+
+    return highFive(
+          pose.landmarks[PoseLandmarkType.leftWrist],
+          pose.landmarks[PoseLandmarkType.leftShoulder],
+          pose.landmarks[PoseLandmarkType.leftThumb],
+          pose.landmarks[PoseLandmarkType.leftIndex],
+          pose.landmarks[PoseLandmarkType.leftPinky],
+        ) ||
+        highFive(
+          pose.landmarks[PoseLandmarkType.rightWrist],
+          pose.landmarks[PoseLandmarkType.rightShoulder],
+          pose.landmarks[PoseLandmarkType.rightThumb],
+          pose.landmarks[PoseLandmarkType.rightIndex],
+          pose.landmarks[PoseLandmarkType.rightPinky],
+        );
+  }
+
+  // Pause uses _isHighFive (wrist near/above shoulder) — safe during reps.
+  // Resume uses _isOpenHand (any open hand) — easy to show while standing still.
+  void _checkPauseGesture(Pose pose) {
+    final detected = _userPaused ? _isOpenHand(pose) : _isHighFive(pose);
+    final holdSecs = _userPaused ? 2 : 3;
+
+    if (!detected) {
+      if (_pauseGestureAt != null) {
+        setState(() {
+          _pauseGestureAt = null;
+          _pauseGestureCountdown = holdSecs;
+        });
+      }
+      return;
+    }
+    final now = DateTime.now();
+    _pauseGestureAt ??= now;
+    final elapsed = now.difference(_pauseGestureAt!).inSeconds;
+    final newCount = (holdSecs - elapsed).clamp(0, holdSecs);
+    if (newCount != _pauseGestureCountdown) {
+      setState(() => _pauseGestureCountdown = newCount);
+    }
+    if (elapsed >= holdSecs) {
+      _pauseGestureAt = null;
+      _pauseGestureCountdown = holdSecs;
+      if (_userPaused) {
+        _resumeSession();
+      } else {
+        _pauseSession();
+      }
+    }
+  }
+
+  void _pauseSession() {
+    _setElapsedSnapshot = _setElapsed;
+    _setTicker?.cancel();
+    setState(() => _userPaused = true);
+    if (_ttsEnabled) _tts.speak('Session paused');
+  }
+
+  void _resumeSession() {
+    // Shift setStartTime back so elapsed continues from the snapshot.
+    _setStartTime = DateTime.now().subtract(_setElapsedSnapshot);
+    _setTicker?.cancel();
+    _setTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || _setStartTime == null) return;
+      setState(() => _setElapsed = DateTime.now().difference(_setStartTime!));
+    });
+    setState(() => _userPaused = false);
+    if (_ttsEnabled) _tts.speak('Resuming. Go!');
+  }
+
   void _checkGesture(Pose pose) {
     if (!_isOpenHand(pose)) {
       _gestureStartAt = null;
@@ -385,7 +486,7 @@ class _CameraViewState extends State<CameraView> {
   //                            [exercise.minRepDurationMs] before the opposite
   //                            phase can fire. Kills sub-second jitter.
   void _countRep(double angle) {
-    if (_sessionPaused || !_sessionStarted) return;
+    if (_sessionPaused || _userPaused || !_sessionStarted) return;
 
     final ex = widget.exercise;
     final bool atBottom;
@@ -598,11 +699,13 @@ class _CameraViewState extends State<CameraView> {
               ),
             ),
 
-          // ③ HUD
+          // ③ HUD body — top bar is rendered last in the Stack so it stays
+          //   above every overlay and is always reachable.
           SafeArea(
             child: Column(
               children: [
-                _topBar(context),
+                // 3 stacked icons × 40 px + 8 px outer padding = 128 px.
+                const SizedBox(height: 136),
                 if (_sessionStarted) ...[
                   Padding(
                     padding: const EdgeInsets.symmetric(
@@ -623,31 +726,58 @@ class _CameraViewState extends State<CameraView> {
             ),
           ),
 
-          // ④ Body-lost warning — shown mid-session when landmarks drop below
-          //    confidence. Rest overlay takes priority if both somehow coincide.
-          if (_sessionStarted && _bodyLostDuringSession && _restCountdown == null)
+          // ④ Body-lost warning — hidden while user is deliberately paused.
+          if (_sessionStarted &&
+              _bodyLostDuringSession &&
+              !_userPaused &&
+              _restCountdown == null)
             _bodyLostOverlay(),
 
-          // ⑤ Inter-set rest overlay
+          // ⑤ User gesture pause overlay — rest overlay takes priority.
+          if (_sessionStarted && _userPaused && _restCountdown == null)
+            _userPauseOverlay(),
+
+          // ⑥ Inter-set rest overlay
           if (_restCountdown != null) _restOverlay(),
+
+          // ⑦ Top bar — Positioned so it escapes StackFit.expand tight
+          //   constraints and always sits at the physical top of the screen,
+          //   above every overlay.
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              bottom: false,
+              child: _topBar(context),
+            ),
+          ),
         ],
       ),
     );
   }
 
   Widget _topBar(BuildContext context) {
+    // Row with crossAxisAlignment.start keeps everything anchored to the top.
+    // Left (1 icon) and right (1 column of 3 icons) are the same width, so
+    // the Expanded center is truly horizontally centered on screen.
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // ── Back button — top left ──────────────────────────────────────
           _HudIcon(
             icon: Icons.arrow_back_rounded,
             onTap: () => context.pop(),
           ),
-          const SizedBox(width: 4),
+
+          // ── Title — centered ────────────────────────────────────────────
           Expanded(
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
+                const SizedBox(height: 6),
                 Text(
                   widget.exercise.name.toUpperCase(),
                   style: const TextStyle(
@@ -656,8 +786,10 @@ class _CameraViewState extends State<CameraView> {
                     fontWeight: FontWeight.w800,
                     letterSpacing: 2,
                   ),
+                  textAlign: TextAlign.center,
                 ),
-                if (_sessionStarted)
+                if (_sessionStarted) ...[
+                  const SizedBox(height: 2),
                   Text(
                     _formatDuration(_setElapsed),
                     style: TextStyle(
@@ -666,21 +798,35 @@ class _CameraViewState extends State<CameraView> {
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
+                ],
               ],
             ),
           ),
-          const SizedBox(width: 4),
-          _HudIcon(
-            icon: _ttsEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded,
-            onTap: () {
-              setState(() => _ttsEnabled = !_ttsEnabled);
-              if (!_ttsEnabled) _tts.stop();
-            },
-          ),
-          const SizedBox(width: 4),
-          _HudIcon(
-            icon: Icons.flip_camera_android_rounded,
-            onTap: _flipCamera,
+
+          // ── Controls — top right, stacked vertically ────────────────────
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _HudIcon(
+                icon: _ttsEnabled
+                    ? Icons.volume_up_rounded
+                    : Icons.volume_off_rounded,
+                onTap: () {
+                  setState(() => _ttsEnabled = !_ttsEnabled);
+                  if (!_ttsEnabled) _tts.stop();
+                },
+              ),
+              const SizedBox(height: 8),
+              _HudIcon(
+                icon: Icons.flip_camera_android_rounded,
+                onTap: _flipCamera,
+              ),
+              const SizedBox(height: 8),
+              _HudIcon(
+                icon: Icons.home_rounded,
+                onTap: () => context.pop(),
+              ),
+            ],
           ),
         ],
       ),
@@ -762,7 +908,26 @@ class _CameraViewState extends State<CameraView> {
               valueColor: AlwaysStoppedAnimation(cs.primary),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.back_hand_outlined,
+                size: 13,
+                color: Colors.white.withValues(alpha: 0.45),
+              ),
+              const SizedBox(width: 5),
+              Text(
+                'Raise open hand to pause',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.45),
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
@@ -882,6 +1047,125 @@ class _CameraViewState extends State<CameraView> {
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _userPauseOverlay() {
+    final cs = Theme.of(context).colorScheme;
+    final holding = _pauseGestureAt != null;
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withValues(alpha: 0.78),
+        child: SafeArea(
+          child: Column(
+            children: [
+              // Space so the always-on-top top bar isn't obscured.
+              const SizedBox(height: 136),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: cs.primary.withValues(alpha: 0.15),
+                        border: Border.all(color: cs.primary, width: 2),
+                      ),
+                      child:
+                          Icon(Icons.pause_rounded, color: cs.primary, size: 40),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      'PAUSED',
+                      style: TextStyle(
+                        color: cs.primary,
+                        fontSize: 32,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 4,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '$_repCount / $_targetReps reps  ·  Set $_currentSet of $_totalSets',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.65),
+                        fontSize: 15,
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+                    Icon(
+                      Icons.back_hand_outlined,
+                      size: 48,
+                      color: holding
+                          ? cs.primary
+                          : Colors.white.withValues(alpha: 0.85),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      holding ? 'Hold still…' : 'Show open hand to resume',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (holding) ...[
+                      const SizedBox(height: 16),
+                      Container(
+                        width: 56,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: cs.primary, width: 2.5),
+                          color: cs.primary.withValues(alpha: 0.2),
+                        ),
+                        child: Center(
+                          child: Text(
+                            '$_pauseGestureCountdown',
+                            style: TextStyle(
+                              color: cs.primary,
+                              fontSize: 26,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 28),
+                    // Tap button fallback — gesture may not always be reliable.
+                    SizedBox(
+                      width: 200,
+                      child: ElevatedButton.icon(
+                        onPressed: _resumeSession,
+                        icon: const Icon(Icons.play_arrow_rounded),
+                        label: const Text('Resume'),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextButton.icon(
+                      onPressed: () => context.pop(),
+                      icon: Icon(
+                        Icons.home_rounded,
+                        color: Colors.white.withValues(alpha: 0.6),
+                        size: 18,
+                      ),
+                      label: Text(
+                        'Leave Session',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.6),
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

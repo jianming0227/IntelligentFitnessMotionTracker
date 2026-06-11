@@ -53,17 +53,28 @@ dependencies:
   google_generative_ai: ^0.4.6
   shared_preferences: ^2.3.2
   path_provider: ^2.1.4
+  flutter_native_splash: ^2.4.3
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
 
-  # The "flutter_lints" package below contains a set of recommended lints to
-  # encourage good coding practices. The lint set provided by the package is
-  # activated in the `analysis_options.yaml` file located at the root of your
-  # package. See that file for information about deactivating specific lint
-  # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/images/fitform_logo.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#14161B"
+  adaptive_icon_foreground: "assets/images/fitform_logo.png"
+
+flutter_native_splash:
+  background_image: assets/images/fitform_splash.png
+  android_12:
+    background_image: assets/images/fitform_splash.png
+  web: false
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

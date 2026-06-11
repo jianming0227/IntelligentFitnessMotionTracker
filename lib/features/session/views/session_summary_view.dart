@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
+import '../../../core/widgets/gradient_background.dart';
+import '../../../services/supabase_service.dart';
 import '../../plan/controllers/plan_controller.dart';
 import '../../profile/models/user_profile_biometrics.dart';
 import '../../profile/providers/profile_providers.dart';
@@ -68,6 +70,28 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
         '${widget.data.exerciseName} — ${widget.data.sets.map((s) => s.toHistorySummary()).join(' | ')}';
     history.add(summary);
     await prefs.setStringList('session_history', history);
+
+    // Best-effort write to Supabase workout_sessions.
+    try {
+      await SupabaseService().insertWorkoutSession(
+        exerciseName: widget.data.exerciseName,
+        setsCompleted: widget.data.sets.length,
+        sessionData: widget.data.sets.map((s) => {
+          'set': s.setNumber,
+          'reps': s.repsCompleted,
+          'form_score': s.formScore,
+          'fatigue_index': s.fatigueIndex,
+          'fatigue_label': s.fatigueLabel,
+          'tut_ms': s.tutMs,
+          'completed_at': s.completedAt.toIso8601String(),
+        }).toList(),
+      );
+        print('[SessionSummary] workout_sessions write OK'); 
+    } catch (e) {
+      // ignore: avoid_print
+      print('[SessionSummary] workout_sessions write failed: $e');
+    }
+
     if (mounted) context.go('/plan');
   }
 
@@ -77,20 +101,23 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
     final generating = planAsync.isLoading;
     final canContinue = !generating && !_saving;
 
-    return Scaffold(
-      backgroundColor: AppColors.background,
+    return GradientBackground(
+      child: Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
-        backgroundColor: AppColors.surface,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         automaticallyImplyLeading: false,
-        title: Text('Session Complete', style: AppTextStyles.titleMedium),
+        title: Text('Session Complete',
+            style: AppTextStyles.titleMedium.copyWith(color: AppColors.primary)),
         centerTitle: true,
       ),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
           // ── Per-set breakdown ─────────────────────────────────────────────
-          Text('Set Breakdown', style: AppTextStyles.titleMedium),
+          Text('Set Breakdown',
+              style: AppTextStyles.titleMedium.copyWith(color: AppColors.primary)),
           const SizedBox(height: 12),
           _SetTable(sets: widget.data.sets),
           const SizedBox(height: 28),
@@ -103,7 +130,7 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
           ElevatedButton(
             onPressed: canContinue ? _saveAndViewPlan : null,
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.secondary,
+              backgroundColor: AppColors.primary,
               disabledBackgroundColor: AppColors.border,
               padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(
@@ -123,6 +150,7 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
           const SizedBox(height: 24),
         ],
       ),
+    ),
     );
   }
 }
@@ -141,7 +169,10 @@ class _PlanStatusBanner extends StatelessWidget {
           const SizedBox(
             width: 18,
             height: 18,
-            child: CircularProgressIndicator(strokeWidth: 2),
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -168,12 +199,12 @@ class _PlanStatusBanner extends StatelessWidget {
       data: (_) => Row(
         children: [
           const Icon(Icons.check_circle_outline_rounded,
-              color: AppColors.secondary, size: 18),
+              color: AppColors.primary, size: 18),
           const SizedBox(width: 8),
           Text(
             'Adaptive plan ready!',
             style: AppTextStyles.bodyMedium
-                .copyWith(color: AppColors.secondary),
+                .copyWith(color: AppColors.primary),
           ),
         ],
       ),
@@ -194,7 +225,14 @@ class _SetTable extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.5)),
+        boxShadow: const [
+          BoxShadow(
+            color: AppColors.primaryGlow,
+            blurRadius: 18,
+            spreadRadius: 1,
+          ),
+        ],
       ),
       child: Column(
         children: [
@@ -204,7 +242,7 @@ class _SetTable extends StatelessWidget {
               form: 'FORM',
               fatigue: 'FATIGUE',
               isHeader: true),
-          const Divider(color: AppColors.border, height: 1),
+          Divider(color: AppColors.primary.withValues(alpha: 0.25), height: 1),
           ...sets.asMap().entries.map((e) {
             final s = e.value;
             return Column(
@@ -216,7 +254,7 @@ class _SetTable extends StatelessWidget {
                   fatigue: s.fatigueLabel,
                 ),
                 if (e.key < sets.length - 1)
-                  const Divider(color: AppColors.border, height: 1),
+                  Divider(color: AppColors.primary.withValues(alpha: 0.15), height: 1),
               ],
             );
           }),
@@ -241,7 +279,7 @@ class _TableRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final base = isHeader ? AppTextStyles.caption : AppTextStyles.bodyMedium;
-    final muted = isHeader ? AppColors.textMuted : AppColors.textPrimary;
+    final muted = isHeader ? AppColors.primary.withValues(alpha: 0.7) : AppColors.textPrimary;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -272,14 +310,14 @@ class _TableRow extends StatelessWidget {
 
   Color _formColor(String f) {
     final pct = int.tryParse(f.replaceAll('%', '')) ?? 0;
-    if (pct >= 70) return AppColors.secondary;
-    if (pct >= 40) return Colors.orange;
+    if (pct >= 70) return AppColors.primary;
+    if (pct >= 40) return AppColors.secondary;
     return AppColors.error;
   }
 
   Color _fatigueColor(String f) {
-    if (f == 'Low') return AppColors.secondary;
-    if (f == 'Moderate') return Colors.orange;
+    if (f == 'Low') return AppColors.primary;
+    if (f == 'Moderate') return AppColors.secondary;
     return AppColors.error;
   }
 }
