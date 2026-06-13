@@ -42,44 +42,100 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
     required UserProfileBiometrics biometrics,
     required List<String> sessionHistory,
   }) async {
+    // Preserve the current plan so a transient failure can never blank-wipe it.
+    final previous = state.valueOrNull;
     state = const AsyncValue.loading();
-    try {
-      final buffer = StringBuffer();
-      final currentLocalTime = DateTime.now();
 
-      await for (final chunk in ref
-          .read(geminiServiceProvider)
-          .streamSessionAnalysis(
-            exerciseName: exerciseName,
-            sets: sets,
-            previousSessionSummaries: sessionHistory,
-            biometrics: biometrics,
-            currentLocalTime: currentLocalTime,
-          )) {
-        buffer.write(chunk);
-      }
+    // A truncated stream (flaky network) surfaces as a FormatException on decode
+    // and is transient — one silent retry usually succeeds. Try at most twice.
+    const maxAttempts = 2;
+    Object? lastError;
+    StackTrace? lastStack;
 
-      final jsonString = buffer.toString();
-      final parsed = jsonDecode(jsonString) as Map<String, dynamic>;
-
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_keyPlan, jsonString);
-      await prefs.setString(_keyLastExercise, exerciseName);
-
-      await _writeJsonFile(jsonString);
-
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        await ref
-            .read(supabaseServiceProvider)
-            .upsertPlan(planJson: parsed, exerciseName: exerciseName);
-      } catch (e) {
-        debugPrint('[PlanController] Supabase upsert skipped: $e');
-      }
+        final parsed = await _streamAndParsePlan(
+          exerciseName: exerciseName,
+          sets: sets,
+          biometrics: biometrics,
+          sessionHistory: sessionHistory,
+        );
 
-      state = AsyncValue.data(parsed);
-    } catch (e, st) {
-      state = AsyncValue.error(e, st);
+        // The parsed Map is re-encoded canonically, then saved to local + supa.
+        final jsonString = jsonEncode(parsed);
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_keyPlan, jsonString);
+        await prefs.setString(_keyLastExercise, exerciseName);
+
+        await _writeJsonFile(jsonString);
+
+        try {
+          await ref
+              .read(supabaseServiceProvider)
+              .upsertPlan(planJson: parsed, exerciseName: exerciseName);
+        } catch (e) {
+          debugPrint('[PlanController] Supabase upsert skipped: $e');
+        }
+
+        state = AsyncValue.data(parsed);
+        return;
+      } catch (e, st) {
+        lastError = e;
+        lastStack = st;
+        debugPrint(
+            '[PlanController] generate attempt $attempt/$maxAttempts failed: $e');
+      }
     }
+
+    // All attempts failed. Never blank-wipe a working plan: if one already
+    // exists, keep it on screen. Only surface an error when there is nothing
+    // to fall back to (e.g. the very first generation).
+    if (previous != null) {
+      state = AsyncValue.data(previous);
+    } else {
+      state = AsyncValue.error(
+        _friendlyError(lastError),
+        lastStack ?? StackTrace.current,
+      );
+    }
+  }
+
+  /// Streams the Gemini plan, accumulates all chunks, then decodes. Throws a
+  /// [FormatException] if the stream was empty or the JSON is incomplete.
+  Future<Map<String, dynamic>> _streamAndParsePlan({
+    required String exerciseName,
+    required List<SetMetrics> sets,
+    required UserProfileBiometrics biometrics,
+    required List<String> sessionHistory,
+  }) async {
+    final buffer = StringBuffer();
+    await for (final chunk
+        in ref.read(geminiServiceProvider).streamSessionAnalysis(
+              exerciseName: exerciseName,
+              sets: sets,
+              previousSessionSummaries: sessionHistory,
+              biometrics: biometrics,
+              currentLocalTime: DateTime.now(),
+            )) {
+      buffer.write(chunk);
+    }
+    final jsonString = buffer.toString().trim();
+    if (jsonString.isEmpty) {
+      throw const FormatException('Empty response from AI');
+    }
+    return jsonDecode(jsonString) as Map<String, dynamic>;
+  }
+
+  /// Converts a raw decode/stream failure into a user-readable message for the
+  /// error view. A truncated stream is almost always a connection drop.
+  Object _friendlyError(Object? error) {
+    if (error is FormatException) {
+      return Exception(
+        'The connection dropped while generating your plan. '
+        'Check your internet and tap Retry.',
+      );
+    }
+    return error ?? Exception('Could not generate plan. Tap Retry.');
   }
 
   Future<void> refreshPlan({required UserProfileBiometrics biometrics}) async {

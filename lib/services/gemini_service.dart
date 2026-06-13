@@ -127,10 +127,22 @@ $historySection
 
 --- PROGRESSION DECISION RULES ---
 Evaluate the fatigue trend across all sets, then apply exactly one rule:
-• MAINTENANCE — if any set has 'High' fatigue: prescribe the same volume as today to allow full neurological recovery.
-• PROGRESSIVE OVERLOAD — if fatigue is 'Low' or 'Moderate' across all sets: safely escalate one of (a) +1–2 reps per set, (b) +1 set, or (c) a 5% load increase — whichever is most appropriate for the user's goal and experience level. Explain why.
+• MAINTENANCE — if any set has 'High' fatigue: prescribe the same volume as today. Insert a rest day as Day 2 — label it "Active Recovery" with light stretching advice.
+• PROGRESSIVE OVERLOAD — if fatigue is 'Low' or 'Moderate' across all sets: safely escalate one of (a) +1–2 reps per set, (b) +1 set, or (c) a 5% load increase. Explain why in the intensity field.
 
 Consider form score when choosing overload magnitude: a form score below 60% should reduce escalation; above 80% allows full escalation.
+
+Apply these biometric rules on top of the fatigue decision:
+• If experienceLevel is 'Beginner': cap escalation at +1 rep per set only — never add sets or increase load.
+• If experienceLevel is 'Intermediate' or 'Advanced': all three escalation options are available.
+• If goal is 'Weight Loss': prefer higher reps (12–15) with shorter rest; avoid load increases.
+• If goal is 'Build Muscle': prefer +1–2 reps or +1 set; load increase only if form score is above 80%.
+• If goal is 'Improve Fitness': balance reps and sets evenly; mirror today's volume on maintenance days.
+• If age is above 50: prefer higher sets × lower reps over load increases.
+
+TUT (Time Under Tension) guidance — apply to the intensity field:
+• If average TUT across sets is below 2.0s: add a tempo cue, e.g. "Focus on a 3s lowering phase — control the movement".
+• If average TUT is above 4.0s: acknowledge the strong time under tension; apply full overload if fatigue permits.
 
 --- EXERCISE CATALOG ---
 Only assign exercises from this list. The actionId must match exactly:

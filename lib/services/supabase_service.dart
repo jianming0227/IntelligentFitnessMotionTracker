@@ -96,8 +96,6 @@ class SupabaseService {
     required List<Map<String, dynamic>> sessionData,
   }) async {
     final userId = currentUser?.id;
-    // ignore: avoid_print
-    print('[SupabaseService] insertWorkoutSession userId=$userId');
     if (userId == null) return;
     await _client.from('workout_sessions').insert({
       'user_id': userId,

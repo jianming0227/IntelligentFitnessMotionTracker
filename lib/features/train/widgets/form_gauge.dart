@@ -65,14 +65,17 @@ class _GaugePainter extends CustomPainter {
 
     // Draw 3 arc segments.
     // Upper semicircle = start at pi (left), sweep +pi clockwise (through top to right).
-    // Each zone is 60° (pi/3).
-    _arc(canvas, arcRect, pi,              pi / 3, AppColors.error);    // left red
-    _arc(canvas, arcRect, pi + pi / 3,    pi / 3, AppColors.secondary); // centre green
-    _arc(canvas, arcRect, pi + 2 * pi / 3, pi / 3, AppColors.error);   // right red
+    // Left red = 90°, orange = 60°, right red = 30° — orange sits right of centre.
+    const leftSweep  = pi / 2;           // 90°
+    const midSweep   = pi / 3;           // 60°
+    const rightSweep = pi / 6;           // 30°
+    _arc(canvas, arcRect, pi,                        leftSweep,  AppColors.error);     // left red
+    _arc(canvas, arcRect, pi + leftSweep,            midSweep,   AppColors.secondary); // orange
+    _arc(canvas, arcRect, pi + leftSweep + midSweep, rightSweep, AppColors.error);    // right red
 
     // Zone boundary tick marks
-    _tick(canvas, center, radius, pi + pi / 3);
-    _tick(canvas, center, radius, pi + 2 * pi / 3);
+    _tick(canvas, center, radius, pi + leftSweep);
+    _tick(canvas, center, radius, pi + leftSweep + midSweep);
 
     // Needle
     if (angle != null) {
@@ -108,7 +111,7 @@ class _GaugePainter extends CustomPainter {
         ..color = color
         ..strokeWidth = _strokeWidth
         ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round,
+        ..strokeCap = StrokeCap.butt,
     );
   }
 

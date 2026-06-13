@@ -7,9 +7,11 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../session/views/session_summary_view.dart';
 import '../models/exercise.dart';
+import '../models/rep_state_machine.dart';
 import '../models/set_metrics.dart';
 import '../widgets/coaching_sheet.dart';
 import '../widgets/form_gauge.dart';
@@ -39,16 +41,15 @@ class _CameraViewState extends State<CameraView> {
   List<Pose> _poses = [];
 
   // ── FR-2.4: Rep counter state ───────────────────────────────────────────────
-  bool _isDown = false;
-  int _repCount = 0;
+  // Counting logic lives in RepStateMachine (pure Dart, unit-tested).
+  late final RepStateMachine _repMachine =
+      RepStateMachine(exercise: widget.exercise);
+  int get _repCount => _repMachine.repCount;
   int _currentSet = 1;
   static const int _totalSets = 3;
   static const int _targetReps = 10;
 
   // ── FR-3.1: Per-set metrics ─────────────────────────────────────────────────
-  DateTime? _repStartTime;
-  DateTime? _phaseEnteredAt; // when current down/up phase began
-  final List<int> _currentRepDurations = [];
   int _greenFrames = 0;
   int _totalFrames = 0;
   final List<SetMetrics> _completedSets = [];
@@ -90,6 +91,11 @@ class _CameraViewState extends State<CameraView> {
   // ── Mid-session body tracking ────────────────────────────────────────────────
   bool _bodyLostDuringSession = false;
 
+  // ── First-launch onboarding overlay ─────────────────────────────────────────
+  // Shown once per install (SharedPreferences flag) — explains camera
+  // placement before the first session.
+  bool _showOnboarding = false;
+
   // ── User gesture pause ───────────────────────────────────────────────────────
   // Raised open-hand (high five) held for 2 s pauses/resumes the active set.
   // Distinct from _sessionPaused which covers coaching sheets and rest overlays.
@@ -107,6 +113,12 @@ class _CameraViewState extends State<CameraView> {
   }
 
   Future<void> _init() async {
+    // E1: show camera placement onboarding once per install.
+    final prefs = await SharedPreferences.getInstance();
+    if (!(prefs.getBool('camera_onboarded') ?? false)) {
+      if (mounted) setState(() => _showOnboarding = true);
+    }
+
     await _tts.setLanguage('en-US');
     await _tts.setSpeechRate(0.5);
     await _tts.setVolume(1.0);
@@ -147,7 +159,10 @@ class _CameraViewState extends State<CameraView> {
   }
 
   Future<void> _processFrame(CameraImage image) async {
-    if (_isDetecting || !mounted || _sessionPaused) return;
+    // _showOnboarding gate: the camera starts streaming behind the first-launch
+    // overlay, so without this the body-in-frame check fires (and speaks) while
+    // the user is still reading the tips and not yet framed.
+    if (_isDetecting || !mounted || _sessionPaused || _showOnboarding) return;
     _isDetecting = true;
     try {
       final input = _toInputImage(image);
@@ -281,10 +296,11 @@ class _CameraViewState extends State<CameraView> {
 
   // ── Body-in-frame gate ──────────────────────────────────────────────────────
   void _checkBodyInFrame(Pose pose) {
-    // Reuse the same confidence-gated angle check: if the exercise-specific
-    // joints (knee for squat, elbow for curl) are all confident, the user is
-    // standing far enough back for the full movement to be tracked.
-    final inFrame = _jointAngle(pose) != null;
+    // Two gates: (1) a true full-body landmark set must be confident — not just
+    // the exercise joints — so ML Kit's extrapolated off-screen guesses can't
+    // trigger a false "Full body detected"; (2) the exercise-specific angle must
+    // also be computable so the movement is actually trackable.
+    final inFrame = _fullBodyVisible(pose) && _jointAngle(pose) != null;
 
     if (inFrame && !_bodyTtsSpoken) {
       _bodyTtsSpoken = true;
@@ -337,6 +353,31 @@ class _CameraViewState extends State<CameraView> {
     for (final l in lms) {
       if (l == null) return false;
       if (l.likelihood < threshold) return false;
+    }
+    return true;
+  }
+
+  // Head-to-feet landmark set. ML Kit always returns all 33 landmarks — it
+  // extrapolates off-screen ones with non-trivial likelihood — so checking only
+  // the exercise joints produced false "detected" hits on a partial view.
+  // Requiring this full spread confident means the user is genuinely framed.
+  static const _fullBodyLandmarks = [
+    PoseLandmarkType.nose,
+    PoseLandmarkType.leftShoulder,
+    PoseLandmarkType.rightShoulder,
+    PoseLandmarkType.leftHip,
+    PoseLandmarkType.rightHip,
+    PoseLandmarkType.leftKnee,
+    PoseLandmarkType.rightKnee,
+    PoseLandmarkType.leftAnkle,
+    PoseLandmarkType.rightAnkle,
+  ];
+
+  bool _fullBodyVisible(Pose pose) {
+    final threshold = widget.exercise.minLandmarkConfidence;
+    for (final type in _fullBodyLandmarks) {
+      final lm = pose.landmarks[type];
+      if (lm == null || lm.likelihood < threshold) return false;
     }
     return true;
   }
@@ -476,56 +517,18 @@ class _CameraViewState extends State<CameraView> {
   }
 
   // ── Rep counter (hardened) ──────────────────────────────────────────────────
-  //
-  // Three guards reject false positives:
-  //   1. Landmark confidence — frames with low likelihood produce no angle.
-  //   2. Strict thresholds   — angle must cross [repBottomAngleStrict] or
-  //                            [repTopAngleStrict] which sit *tighter* than
-  //                            the form gauge green zone.
-  //   3. Min phase duration  — once entered, a phase must persist at least
-  //                            [exercise.minRepDurationMs] before the opposite
-  //                            phase can fire. Kills sub-second jitter.
+  // Logic lives in RepStateMachine — see lib/features/train/models/
+  // rep_state_machine.dart for the three-guard documentation and unit tests.
   void _countRep(double angle) {
     if (_sessionPaused || _userPaused || !_sessionStarted) return;
 
-    final ex = widget.exercise;
-    final bool atBottom;
-    final bool atTop;
-    if (ex.id == 'bicep_curl') {
-      atBottom = angle > ex.repBottomAngleStrict; // arm extended
-      atTop = angle < ex.repTopAngleStrict;        // arm curled
-    } else {
-      atBottom = angle < ex.repBottomAngleStrict;  // squat depth
-      atTop = angle > ex.repTopAngleStrict;        // standing
-    }
+    final repCompleted = _repMachine.feed(angle, DateTime.now());
+    if (!repCompleted) return;
 
-    final now = DateTime.now();
-    final phaseAgeMs = _phaseEnteredAt == null
-        ? 0
-        : now.difference(_phaseEnteredAt!).inMilliseconds;
-
-    if (!_isDown && atBottom && phaseAgeMs >= ex.minRepDurationMs) {
-      _isDown = true;
-      _phaseEnteredAt = now;
-      _repStartTime = now;
-    } else if (_isDown && atTop && phaseAgeMs >= ex.minRepDurationMs) {
-      _isDown = false;
-      _phaseEnteredAt = now;
-      if (_repStartTime != null) {
-        _currentRepDurations
-            .add(now.difference(_repStartTime!).inMilliseconds);
-        _repStartTime = null;
-      }
-      _repCount++;
-      if (_repCount >= _targetReps) {
-        _onSetComplete();
-      } else {
-        setState(() {});
-      }
+    if (_repCount >= _targetReps) {
+      _onSetComplete();
     } else {
-      // If the state isn't ready to flip, still anchor the phase start the
-      // first time we land in a recognisable position so the guard works.
-      _phaseEnteredAt ??= now;
+      setState(() {});
     }
   }
 
@@ -534,7 +537,7 @@ class _CameraViewState extends State<CameraView> {
     _sessionStarted = true;
     _setStartTime = DateTime.now();
     _setElapsed = Duration.zero;
-    _phaseEnteredAt = null;
+    _repMachine.resetPhase();
     _setTicker?.cancel();
     _setTicker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted || _setStartTime == null) return;
@@ -549,7 +552,7 @@ class _CameraViewState extends State<CameraView> {
     _sessionPaused = true;
     _setTicker?.cancel();
 
-    final durations = List<int>.from(_currentRepDurations);
+    final durations = List<int>.from(_repMachine.repDurationsMs);
     final fatigueIndex = (durations.length >= 2)
         ? ((durations.last / durations.first) - 1).clamp(0.0, 2.0)
         : 0.0;
@@ -573,7 +576,7 @@ class _CameraViewState extends State<CameraView> {
     _totalFrames = 0;
     _tutMs = 0;
     _tutZoneEnteredAt = null;
-    _currentRepDurations.clear();
+    _repMachine.clearDurations();
     setState(() {});
 
     showModalBottomSheet(
@@ -608,7 +611,7 @@ class _CameraViewState extends State<CameraView> {
   void _startRestCountdown() {
     final secs = widget.exercise.restBetweenSetsSec.clamp(3, 60);
     setState(() {
-      _repCount = 0;
+      _repMachine.resetRepCount();
       _currentSet++;
       _restCountdown = secs;
       _sessionPaused = true;
@@ -750,6 +753,99 @@ class _CameraViewState extends State<CameraView> {
             child: SafeArea(
               bottom: false,
               child: _topBar(context),
+            ),
+          ),
+
+          // ⑧ First-launch onboarding — covers everything until dismissed.
+          if (_showOnboarding) _onboardingOverlay(),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _dismissOnboarding() async {
+    setState(() => _showOnboarding = false);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('camera_onboarded', true);
+  }
+
+  Widget _onboardingOverlay() {
+    final cs = Theme.of(context).colorScheme;
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withValues(alpha: 0.88),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.smartphone_rounded,
+                        size: 44, color: cs.primary),
+                    const SizedBox(width: 12),
+                    Icon(Icons.sync_alt_rounded,
+                        size: 28, color: Colors.white.withValues(alpha: 0.6)),
+                    const SizedBox(width: 12),
+                    Icon(Icons.accessibility_new_rounded,
+                        size: 56, color: cs.primary),
+                  ],
+                ),
+                const SizedBox(height: 28),
+                const Text(
+                  'Set up your camera',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 20),
+                _onboardingTip(Icons.straighten_rounded,
+                    'Place your phone 2–3 metres away'),
+                _onboardingTip(Icons.accessibility_rounded,
+                    'Your full body must be visible — head to feet'),
+                _onboardingTip(Icons.light_mode_rounded,
+                    'Face a light source, avoid backlight'),
+                _onboardingTip(Icons.back_hand_outlined,
+                    'Show an open hand for 3 seconds to start'),
+                const SizedBox(height: 32),
+                SizedBox(
+                  width: 200,
+                  child: ElevatedButton(
+                    onPressed: _dismissOnboarding,
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    child: const Text('Got it'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _onboardingTip(IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: Colors.white.withValues(alpha: 0.7)),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.85),
+                fontSize: 14,
+                height: 1.4,
+              ),
             ),
           ),
         ],

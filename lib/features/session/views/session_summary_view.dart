@@ -40,6 +40,11 @@ class SessionSummaryView extends ConsumerStatefulWidget {
 class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
   bool _saving = false;
 
+  // UID-prefixed so multiple accounts on one device stay isolated — must
+  // match PlanController._keyHistory.
+  String get _historyKey =>
+      '${SupabaseService().currentUser?.id ?? 'demo'}_session_history';
+
   @override
   void initState() {
     super.initState();
@@ -48,7 +53,7 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
 
   Future<void> _triggerPlanGeneration() async {
     final prefs = await SharedPreferences.getInstance();
-    final history = prefs.getStringList('session_history') ?? [];
+    final history = prefs.getStringList(_historyKey) ?? [];
 
     // Use saved profile or fall back to defaults so plan generation always runs.
     final profile =
@@ -65,11 +70,14 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
   Future<void> _saveAndViewPlan() async {
     setState(() => _saving = true);
     final prefs = await SharedPreferences.getInstance();
-    final history = prefs.getStringList('session_history') ?? [];
+    final history = prefs.getStringList(_historyKey) ?? [];
+    // ISO date prefix lets the Home dashboard compute streaks and weekly
+    // charts; Gemini also benefits from dated history entries.
     final summary =
-        '${widget.data.exerciseName} — ${widget.data.sets.map((s) => s.toHistorySummary()).join(' | ')}';
+        '${DateTime.now().toIso8601String()}|${widget.data.exerciseName} — ${widget.data.sets.map((s) => s.toHistorySummary()).join(' | ')}';
     history.add(summary);
-    await prefs.setStringList('session_history', history);
+    final capped = history.length > 10 ? history.sublist(history.length - 10) : history;
+    await prefs.setStringList(_historyKey, capped);
 
     // Best-effort write to Supabase workout_sessions.
     try {
@@ -86,10 +94,7 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
           'completed_at': s.completedAt.toIso8601String(),
         }).toList(),
       );
-        print('[SessionSummary] workout_sessions write OK'); 
-    } catch (e) {
-      // ignore: avoid_print
-      print('[SessionSummary] workout_sessions write failed: $e');
+    } catch (_) {
     }
 
     if (mounted) context.go('/plan');

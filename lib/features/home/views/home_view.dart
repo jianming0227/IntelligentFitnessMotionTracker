@@ -7,6 +7,7 @@ import '../../../core/providers/theme_mode_provider.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../profile/providers/profile_providers.dart';
 import '../../train/models/exercise.dart';
+import '../widgets/recent_activity_panel.dart';
 
 // FR-3.2: Home — greets the user, surfaces a "Select Your Training" carousel
 // of supported exercises, and points the user at their AI-personalised plan.
@@ -87,6 +88,12 @@ class HomeView extends ConsumerWidget {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: gutter),
               child: _AiCoachPanel(onTap: () => context.go('/plan')),
+            ),
+            const SizedBox(height: 20),
+            // FR-4.2: Recent sessions, weekly rep chart, streak counter.
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: gutter),
+              child: RecentActivityPanel(),
             ),
             const SizedBox(height: 12),
             const Padding(
