@@ -32,8 +32,11 @@ class PlanScreen extends ConsumerWidget {
                   const Spacer(),
                   if (planAsync.value != null && !isLoading)
                     IconButton(
-                      icon: Icon(Icons.delete_outline_rounded,
-                          color: cs.error, size: 22),
+                      icon: Icon(
+                        Icons.delete_outline_rounded,
+                        color: cs.error,
+                        size: 22,
+                      ),
                       tooltip: 'Delete plan',
                       onPressed: () => _confirmDelete(context, ref),
                     ),
@@ -42,11 +45,13 @@ class PlanScreen extends ConsumerWidget {
               ),
             ),
             Expanded(
+              //1. User clicked on the Generate Plan Button
               child: planAsync.when(
                 loading: () => _LoadingView(),
                 error: (err, _) =>
                     _ErrorView(error: err, onRetry: () => _refresh(ref)),
-                data: (json) => json == null || json.isEmpty
+                data: (json) => json == null || json.isEmpty   
+                /// 7. Receive the decoded json and pass to parser to call buildDynamicWidget
                     ? const _EmptyView()
                     : buildDynamicWidget(
                         json,
@@ -62,6 +67,7 @@ class PlanScreen extends ConsumerWidget {
     );
   }
 
+  //2. Trigger the plan provider to listen and call refreshPlan together with the biometric profile
   void _refresh(WidgetRef ref) {
     final biometrics =
         ref.read(profileProvider).value ?? UserProfileBiometrics.defaults;
@@ -74,15 +80,17 @@ class PlanScreen extends ConsumerWidget {
       builder: (_) => AlertDialog(
         title: const Text('Delete Plan'),
         content: const Text(
-            'This removes your current plan from all devices. Complete a session to generate a new one.'),
+          'This removes your current plan from all devices. Complete a session to generate a new one.',
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
           TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Delete',
-                  style: TextStyle(color: Colors.red))),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
         ],
       ),
     );
@@ -187,8 +195,11 @@ class _EmptyView extends StatelessWidget {
                 color: cs.primary.withValues(alpha: 0.15),
                 shape: BoxShape.circle,
               ),
-              child: Icon(Icons.calendar_today_rounded,
-                  color: cs.primary, size: 36),
+              child: Icon(
+                Icons.calendar_today_rounded,
+                color: cs.primary,
+                size: 36,
+              ),
             ),
             const SizedBox(height: 20),
             Text('No active adaptive routine', style: tt.titleMedium),

@@ -52,6 +52,7 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
     Object? lastError;
     StackTrace? lastStack;
 
+    //4.  Retry for two time to call Stream function and write to storage
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         final parsed = await _streamAndParsePlan(
@@ -76,7 +77,7 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
         } catch (e) {
           debugPrint('[PlanController] Supabase upsert skipped: $e');
         }
-
+        /// 6. Change the state and ref.read will change the ui
         state = AsyncValue.data(parsed);
         return;
       } catch (e, st) {
@@ -90,6 +91,7 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
     // All attempts failed. Never blank-wipe a working plan: if one already
     // exists, keep it on screen. Only surface an error when there is nothing
     // to fall back to (e.g. the very first generation).
+    // Preserve previous
     if (previous != null) {
       state = AsyncValue.data(previous);
     } else {
@@ -100,8 +102,9 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
     }
   }
 
-  /// Streams the Gemini plan, accumulates all chunks, then decodes. Throws a
+  /// 5. Streams the Gemini plan, accumulates all chunks, then decodes into map. Throws a
   /// [FormatException] if the stream was empty or the JSON is incomplete.
+  
   Future<Map<String, dynamic>> _streamAndParsePlan({
     required String exerciseName,
     required List<SetMetrics> sets,
@@ -109,7 +112,7 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
     required List<String> sessionHistory,
   }) async {
     final buffer = StringBuffer();
-    await for (final chunk
+    await for (final chunk // Call gemini provider
         in ref.read(geminiServiceProvider).streamSessionAnalysis(
               exerciseName: exerciseName,
               sets: sets,
@@ -123,6 +126,7 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
     if (jsonString.isEmpty) {
       throw const FormatException('Empty response from AI');
     }
+    //decode as Map
     return jsonDecode(jsonString) as Map<String, dynamic>;
   }
 
@@ -137,7 +141,7 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
     }
     return error ?? Exception('Could not generate plan. Tap Retry.');
   }
-
+  //3. Refresh Button is trigger and call generate plan, saved the history and exercise name
   Future<void> refreshPlan({required UserProfileBiometrics biometrics}) async {
     final prefs = await SharedPreferences.getInstance();
     final history = prefs.getStringList(_keyHistory) ?? [];

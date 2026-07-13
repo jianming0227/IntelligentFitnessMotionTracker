@@ -12,6 +12,7 @@ Widget buildDynamicWidget(
   VoidCallback? onRefresh,
   bool isLoading = false,
 }) {
+  //8. Change the json map into widgets
   //Checked the type of json node (Gemini Prompt output json schema)
   return switch (jsonNode['type'] as String? ?? '') {
     'WorkoutPlanView' => _WorkoutPlanView(

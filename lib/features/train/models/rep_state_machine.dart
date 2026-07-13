@@ -29,6 +29,7 @@ class RepStateMachine {
   bool feed(double angle, DateTime now) {
     final bool atBottom;
     final bool atTop;
+    // The 
     if (exercise.id == 'bicep_curl') {
       atBottom = angle > exercise.repBottomAngleStrict; // arm extended
       atTop = angle < exercise.repTopAngleStrict; // arm curled
