@@ -14,6 +14,7 @@ import '../models/exercise.dart';
 import '../models/rep_state_machine.dart';
 import '../models/set_metrics.dart';
 import '../widgets/coaching_sheet.dart';
+import '../widgets/endurance_bar.dart';
 import '../widgets/form_gauge.dart';
 import '../widgets/pose_painter.dart';
 
@@ -42,8 +43,9 @@ class _CameraViewState extends State<CameraView> {
 
   // ── FR-2.4: Rep counter state ───────────────────────────────────────────────
   // Counting logic lives in RepStateMachine (pure Dart, unit-tested).
-  late final RepStateMachine _repMachine =
-      RepStateMachine(exercise: widget.exercise);
+  late final RepStateMachine _repMachine = RepStateMachine(
+    exercise: widget.exercise,
+  );
   int get _repCount => _repMachine.repCount;
   int _currentSet = 1;
   static const int _totalSets = 3;
@@ -58,8 +60,17 @@ class _CameraViewState extends State<CameraView> {
   DateTime? _tutZoneEnteredAt;
   int _tutMs = 0;
 
+  // FR-2.4: live Endurance Bar input — fraction of the set so far spent in the
+  // target zone. Uses the set ticker's elapsed time as the denominator.
+  double get _liveTutRatio {
+    final elapsedMs = _setElapsed.inMilliseconds;
+    if (elapsedMs <= 0) return 0.0;
+    return (_tutMs / elapsedMs).clamp(0.0, 1.0);
+  }
+
   // ── Session lifecycle ───────────────────────────────────────────────────────
-  bool _sessionPaused = false; // true while bottom sheet visible or counting down
+  bool _sessionPaused =
+      false; // true while bottom sheet visible or counting down
   bool _sessionStarted = false;
   DateTime? _gestureStartAt;
   int _gestureCountdown = 3;
@@ -158,10 +169,12 @@ class _CameraViewState extends State<CameraView> {
     setState(() {});
   }
 
+  // Main Function
   Future<void> _processFrame(CameraImage image) async {
     // _showOnboarding gate: the camera starts streaming behind the first-launch
     // overlay, so without this the body-in-frame check fires (and speaks) while
     // the user is still reading the tips and not yet framed.
+    // if any of these case happens then return ntg
     if (_isDetecting || !mounted || _sessionPaused || _showOnboarding) return;
     _isDetecting = true;
     try {
@@ -198,7 +211,8 @@ class _CameraViewState extends State<CameraView> {
             setState(() => _bodyLostDuringSession = false);
           }
           _totalFrames++;
-          final inZone = angle >= widget.exercise.targetAngleMin &&
+          final inZone =
+              angle >= widget.exercise.targetAngleMin &&
               angle <= widget.exercise.targetAngleMax;
           if (inZone) {
             _greenFrames++;
@@ -238,8 +252,9 @@ class _CameraViewState extends State<CameraView> {
 
   InputImage? _toInputImage(CameraImage image) {
     final camera = _cameras[_cameraIndex];
-    final rotation =
-        InputImageRotationValue.fromRawValue(camera.sensorOrientation);
+    final rotation = InputImageRotationValue.fromRawValue(
+      camera.sensorOrientation,
+    );
     final format = InputImageFormatValue.fromRawValue(image.format.raw);
     if (rotation == null || format == null || image.planes.isEmpty) return null;
 
@@ -257,7 +272,8 @@ class _CameraViewState extends State<CameraView> {
 
   // ── TTS coaching ────────────────────────────────────────────────────────────
   void _checkBadForm(double angle) {
-    final inZone = angle >= widget.exercise.targetAngleMin &&
+    final inZone =
+        angle >= widget.exercise.targetAngleMin &&
         angle <= widget.exercise.targetAngleMax;
 
     if (inZone) {
@@ -277,8 +293,13 @@ class _CameraViewState extends State<CameraView> {
 
     _lastCueAt = now;
     _badFormSince = now;
+    // if bicep curl else squat
     final cues = widget.exercise.id == 'bicep_curl'
-        ? ['Full extension at the bottom', 'Squeeze at the top', 'Keep your elbow still']
+        ? [
+            'Full extension at the bottom',
+            'Squeeze at the top',
+            'Keep your elbow still',
+          ]
         : ['Go deeper', 'Keep your chest up', 'Knees track over toes'];
     _tts.speak(cues[DateTime.now().second % cues.length]);
   }
@@ -290,7 +311,12 @@ class _CameraViewState extends State<CameraView> {
       return;
     }
     _lastMotivationAt = now;
-    const cues = ['Great form!', 'Keep it up!', 'Looking strong!', 'Perfect pace!'];
+    const cues = [
+      'Great form!',
+      'Keep it up!',
+      'Looking strong!',
+      'Perfect pace!',
+    ];
     _tts.speak(cues[now.second % cues.length]);
   }
 
@@ -319,6 +345,7 @@ class _CameraViewState extends State<CameraView> {
   /// Returns the angle in degrees only if all three landmarks meet the
   /// per-exercise confidence threshold. Low-confidence frames are dropped so
   /// they can't toggle the rep state machine.
+  /// if bicep curl, else squat
   double? _jointAngle(Pose pose) {
     if (widget.exercise.id == 'bicep_curl') return _elbowAngle(pose);
     return _kneeAngle(pose);
@@ -328,6 +355,7 @@ class _CameraViewState extends State<CameraView> {
     final hip = pose.landmarks[PoseLandmarkType.leftHip];
     final knee = pose.landmarks[PoseLandmarkType.leftKnee];
     final ankle = pose.landmarks[PoseLandmarkType.leftAnkle];
+    // Return null if the confident was below threshold
     if (!_landmarksConfident([hip, knee, ankle])) return null;
     return _angleAt(hip!, knee!, ankle!);
   }
@@ -340,11 +368,11 @@ class _CameraViewState extends State<CameraView> {
     return _angleAt(shoulder!, elbow!, wrist!);
   }
 
+  //The pure math logic of calculation of angle
   double _angleAt(PoseLandmark a, PoseLandmark b, PoseLandmark c) {
     final ba = Offset(a.x - b.x, a.y - b.y);
     final bc = Offset(c.x - b.x, c.y - b.y);
-    final cosA =
-        (ba.dx * bc.dx + ba.dy * bc.dy) / (ba.distance * bc.distance);
+    final cosA = (ba.dx * bc.dx + ba.dy * bc.dy) / (ba.distance * bc.distance);
     return acos(cosA.clamp(-1.0, 1.0)) * 180 / pi;
   }
 
@@ -424,7 +452,9 @@ class _CameraViewState extends State<CameraView> {
           shoulder == null ||
           thumb == null ||
           index == null ||
-          pinky == null) { return false; }
+          pinky == null) {
+        return false;
+      }
       // +30 px margin so the wrist only needs to reach near-shoulder height.
       final handRaised = wrist.y < shoulder.y + 30;
       final handOpen =
@@ -557,8 +587,9 @@ class _CameraViewState extends State<CameraView> {
         ? ((durations.last / durations.first) - 1).clamp(0.0, 2.0)
         : 0.0;
 
-    final formScore =
-        _totalFrames > 0 ? (_greenFrames / _totalFrames).clamp(0.0, 1.0) : 0.0;
+    final formScore = _totalFrames > 0
+        ? (_greenFrames / _totalFrames).clamp(0.0, 1.0)
+        : 0.0;
 
     final metrics = SetMetrics(
       setNumber: _currentSet,
@@ -568,6 +599,9 @@ class _CameraViewState extends State<CameraView> {
       repDurationsMs: durations,
       completedAt: DateTime.now(),
       tutMs: _tutMs,
+      romScore: _repMachine.romScore,
+      repRomSpans: List<double>.from(_repMachine.repRomSpans),
+      setDurationMs: _setElapsed.inMilliseconds,
     );
 
     _completedSets.add(metrics);
@@ -576,7 +610,7 @@ class _CameraViewState extends State<CameraView> {
     _totalFrames = 0;
     _tutMs = 0;
     _tutZoneEnteredAt = null;
-    _repMachine.clearDurations();
+    _repMachine.clearSetSamples();
     setState(() {});
 
     showModalBottomSheet(
@@ -687,10 +721,7 @@ class _CameraViewState extends State<CameraView> {
           // ① FR-2.1: Camera preview — aspect-ratio-preserving cover fit so
           //   the feed isn't stretched vertically on phones whose screen
           //   aspect differs from the camera sensor (most do).
-          _CoverCameraPreview(
-            controller: _controller!,
-            imageSize: imageSize,
-          ),
+          _CoverCameraPreview(controller: _controller!, imageSize: imageSize),
 
           // ② FR-2.1: 33-landmark skeleton overlay
           if (_poses.isNotEmpty)
@@ -712,11 +743,27 @@ class _CameraViewState extends State<CameraView> {
                 if (_sessionStarted) ...[
                   Padding(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 40, vertical: 8),
+                      horizontal: 40,
+                      vertical: 8,
+                    ),
                     child: FormGauge(
                       angle: _currentAngle,
                       minAngle: widget.exercise.targetAngleMin,
                       maxAngle: widget.exercise.targetAngleMax,
+                      visible: _showGauge,
+                      onTap: () => setState(() => _showGauge = !_showGauge),
+                    ),
+                  ),
+                  // FR-2.4: composite endurance readout. Shares the gauge's
+                  // visibility tap so one tap dims the whole metrics block.
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 40,
+                      vertical: 4,
+                    ),
+                    child: EnduranceBar(
+                      romScore: _repMachine.romScore,
+                      tutRatio: _liveTutRatio,
                       visible: _showGauge,
                       onTap: () => setState(() => _showGauge = !_showGauge),
                     ),
@@ -750,10 +797,7 @@ class _CameraViewState extends State<CameraView> {
             top: 0,
             left: 0,
             right: 0,
-            child: SafeArea(
-              bottom: false,
-              child: _topBar(context),
-            ),
+            child: SafeArea(bottom: false, child: _topBar(context)),
           ),
 
           // ⑧ First-launch onboarding — covers everything until dismissed.
@@ -783,14 +827,19 @@ class _CameraViewState extends State<CameraView> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.smartphone_rounded,
-                        size: 44, color: cs.primary),
+                    Icon(Icons.smartphone_rounded, size: 44, color: cs.primary),
                     const SizedBox(width: 12),
-                    Icon(Icons.sync_alt_rounded,
-                        size: 28, color: Colors.white.withValues(alpha: 0.6)),
+                    Icon(
+                      Icons.sync_alt_rounded,
+                      size: 28,
+                      color: Colors.white.withValues(alpha: 0.6),
+                    ),
                     const SizedBox(width: 12),
-                    Icon(Icons.accessibility_new_rounded,
-                        size: 56, color: cs.primary),
+                    Icon(
+                      Icons.accessibility_new_rounded,
+                      size: 56,
+                      color: cs.primary,
+                    ),
                   ],
                 ),
                 const SizedBox(height: 28),
@@ -804,14 +853,22 @@ class _CameraViewState extends State<CameraView> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 20),
-                _onboardingTip(Icons.straighten_rounded,
-                    'Place your phone 2–3 metres away'),
-                _onboardingTip(Icons.accessibility_rounded,
-                    'Your full body must be visible — head to feet'),
-                _onboardingTip(Icons.light_mode_rounded,
-                    'Face a light source, avoid backlight'),
-                _onboardingTip(Icons.back_hand_outlined,
-                    'Show an open hand for 3 seconds to start'),
+                _onboardingTip(
+                  Icons.straighten_rounded,
+                  'Place your phone 2–3 metres away',
+                ),
+                _onboardingTip(
+                  Icons.accessibility_rounded,
+                  'Your full body must be visible — head to feet',
+                ),
+                _onboardingTip(
+                  Icons.light_mode_rounded,
+                  'Face a light source, avoid backlight',
+                ),
+                _onboardingTip(
+                  Icons.back_hand_outlined,
+                  'Show an open hand for 3 seconds to start',
+                ),
                 const SizedBox(height: 32),
                 SizedBox(
                   width: 200,
@@ -863,10 +920,7 @@ class _CameraViewState extends State<CameraView> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // ── Back button — top left ──────────────────────────────────────
-          _HudIcon(
-            icon: Icons.arrow_back_rounded,
-            onTap: () => context.pop(),
-          ),
+          _HudIcon(icon: Icons.arrow_back_rounded, onTap: () => context.pop()),
 
           // ── Title — centered ────────────────────────────────────────────
           Expanded(
@@ -918,10 +972,7 @@ class _CameraViewState extends State<CameraView> {
                 onTap: _flipCamera,
               ),
               const SizedBox(height: 8),
-              _HudIcon(
-                icon: Icons.home_rounded,
-                onTap: () => context.pop(),
-              ),
+              _HudIcon(icon: Icons.home_rounded, onTap: () => context.pop()),
             ],
           ),
         ],
@@ -1032,7 +1083,8 @@ class _CameraViewState extends State<CameraView> {
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.white,
                     side: BorderSide(
-                        color: Colors.white.withValues(alpha: 0.3)),
+                      color: Colors.white.withValues(alpha: 0.3),
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
                   icon: const Icon(Icons.stop_rounded, size: 18),
@@ -1171,8 +1223,11 @@ class _CameraViewState extends State<CameraView> {
                         color: cs.primary.withValues(alpha: 0.15),
                         border: Border.all(color: cs.primary, width: 2),
                       ),
-                      child:
-                          Icon(Icons.pause_rounded, color: cs.primary, size: 40),
+                      child: Icon(
+                        Icons.pause_rounded,
+                        color: cs.primary,
+                        size: 40,
+                      ),
                     ),
                     const SizedBox(height: 20),
                     Text(
@@ -1275,8 +1330,7 @@ class _CameraViewState extends State<CameraView> {
           child: Center(
             child: Container(
               margin: const EdgeInsets.symmetric(horizontal: 32),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
               decoration: BoxDecoration(
                 color: Colors.black.withValues(alpha: 0.82),
                 borderRadius: BorderRadius.circular(24),
@@ -1395,8 +1449,11 @@ class _CameraViewState extends State<CameraView> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.camera_alt_outlined,
-                  color: cs.onSurface.withValues(alpha: 0.5), size: 64),
+              Icon(
+                Icons.camera_alt_outlined,
+                color: cs.onSurface.withValues(alpha: 0.5),
+                size: 64,
+              ),
               const SizedBox(height: 24),
               Text(
                 'Camera access needed',
@@ -1478,9 +1535,10 @@ class _ScanningDotState extends State<_ScanningDot>
       vsync: this,
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
-    _anim = Tween<double>(begin: 0.3, end: 1.0).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
-    );
+    _anim = Tween<double>(
+      begin: 0.3,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
   }
 
   @override

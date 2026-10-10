@@ -31,9 +31,7 @@ class TrainView extends StatelessWidget {
                     },
                   ),
                   Expanded(
-                    child: Center(
-                      child: Text('Courses', style: tt.titleLarge),
-                    ),
+                    child: Center(child: Text('Courses', style: tt.titleLarge)),
                   ),
                   const SizedBox(width: 44), // mirror back-button for centering
                 ],

@@ -9,6 +9,10 @@ enum ExerciseCategory { legs, upper, core }
 ///     joint must cross to register a rep. Set these tighter than the green
 ///     zone to reject standing-around motion. (Defaults below are tighter
 ///     than the form zone for both exercises.)
+///   • [romFullSpanDeg] — the joint excursion of a textbook-perfect rep, in
+///     degrees. Per-rep ROM is scored against this, NOT against the strict rep
+///     thresholds: a rep cannot be counted without crossing those, so scoring
+///     against them would rate every counted rep 100%.
 ///   • [minRepDurationMs] — discards rep crossings faster than this; kills
 ///     jitter from landmark wobble while standing still.
 ///   • [minLandmarkConfidence] — drop frames where the three key joints have
@@ -26,6 +30,7 @@ class Exercise {
     required this.targetAngleMax,
     required this.repBottomAngleStrict,
     required this.repTopAngleStrict,
+    required this.romFullSpanDeg,
     this.minRepDurationMs = 700,
     this.minLandmarkConfidence = 0.55,
     this.restBetweenSetsSec = 30,
@@ -45,15 +50,19 @@ class Exercise {
   final double repBottomAngleStrict;
   final double repTopAngleStrict;
 
+  // FR-2.4: degrees of joint travel in an ideal full-range rep — the
+  // denominator for RepStateMachine.romScore.
+  final double romFullSpanDeg;
+
   final int minRepDurationMs;
   final double minLandmarkConfidence;
   final int restBetweenSetsSec;
 
   String get categoryLabel => switch (category) {
-        ExerciseCategory.legs => 'Legs',
-        ExerciseCategory.upper => 'Upper',
-        ExerciseCategory.core => 'Core',
-      };
+    ExerciseCategory.legs => 'Legs',
+    ExerciseCategory.upper => 'Upper',
+    ExerciseCategory.core => 'Core',
+  };
 
   // ── Catalog ────────────────────────────────────────────────────────────────
   // Tweak the numbers below to adjust accuracy without touching the camera code.
@@ -68,8 +77,9 @@ class Exercise {
       //   ~180° = standing tall, ~90° = parallel squat, <70° = deep squat.
       targetAngleMin: 70,
       targetAngleMax: 100,
-      repBottomAngleStrict: 95,  // must drop below this to count "down"
-      repTopAngleStrict: 168,    // must return above this to count "up"
+      repBottomAngleStrict: 95, // must drop below this to count "down"
+      repTopAngleStrict: 168, // must return above this to count "up"
+      romFullSpanDeg: 105, // 175° standing → 70° deep
       minRepDurationMs: 800,
     ),
     Exercise(
@@ -83,7 +93,8 @@ class Exercise {
       targetAngleMin: 30,
       targetAngleMax: 100,
       repBottomAngleStrict: 162, // arm must straighten past this
-      repTopAngleStrict: 40,     // arm must curl past this
+      repTopAngleStrict: 40, // arm must curl past this
+      romFullSpanDeg: 140, // 170° extended → 30° curled
       minRepDurationMs: 600,
     ),
   ];

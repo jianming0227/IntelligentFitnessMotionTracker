@@ -16,14 +16,20 @@ void main() {
       // First confident frame anchors the phase clock — no transition yet.
       expect(machine.feed(165, t0), false);
       // 700ms later, still extended → bottom phase locks.
-      expect(machine.feed(165, t0.add(const Duration(milliseconds: 700))),
-          false);
+      expect(
+        machine.feed(165, t0.add(const Duration(milliseconds: 700))),
+        false,
+      );
       // Curl arrives but phase is only 0ms old → guarded.
       expect(
-          machine.feed(35, t0.add(const Duration(milliseconds: 700))), false);
+        machine.feed(35, t0.add(const Duration(milliseconds: 700))),
+        false,
+      );
       // 700ms into the down phase, curled past 40° → rep completes.
       expect(
-          machine.feed(35, t0.add(const Duration(milliseconds: 1400))), true);
+        machine.feed(35, t0.add(const Duration(milliseconds: 1400))),
+        true,
+      );
 
       expect(machine.repCount, 1);
     });
@@ -88,8 +94,7 @@ void main() {
       expect(machine.repDurationsMs, [700]);
     });
 
-    test('resetRepCount zeroes the counter, keeps durations until cleared',
-        () {
+    test('resetRepCount zeroes the counter, keeps durations until cleared', () {
       final machine = RepStateMachine(exercise: bicepCurl);
       final t0 = DateTime(2026, 1, 1);
 
@@ -102,7 +107,7 @@ void main() {
       expect(machine.repCount, 0);
       expect(machine.repDurationsMs.length, 1);
 
-      machine.clearDurations();
+      machine.clearSetSamples();
       expect(machine.repDurationsMs, isEmpty);
     });
   });
@@ -116,8 +121,10 @@ void main() {
 
       machine.feed(90, t0); // anchor
       machine.feed(90, t0.add(const Duration(milliseconds: 900))); // bottom
-      final completed =
-          machine.feed(175, t0.add(const Duration(milliseconds: 1800)));
+      final completed = machine.feed(
+        175,
+        t0.add(const Duration(milliseconds: 1800)),
+      );
 
       expect(completed, true);
       expect(machine.repCount, 1);
@@ -143,6 +150,109 @@ void main() {
       machine.feed(160, t0.add(const Duration(milliseconds: 1800)));
 
       expect(machine.repCount, 0);
+    });
+  });
+
+  // FR-2.4 ROM: per-rep angle excursion, normalised against
+  // Exercise.romFullSpanDeg (squat 105°, bicep curl 140°). Normalising
+  // against the strict rep thresholds would be useless — a rep cannot be
+  // counted without crossing them, so every counted rep would score 100%.
+  group('RepStateMachine — range of motion', () {
+    test('records nothing until the first rep closes', () {
+      final machine = RepStateMachine(exercise: squat);
+      final t0 = DateTime(2026, 1, 1);
+
+      machine.feed(90, t0);
+      machine.feed(90, t0.add(const Duration(milliseconds: 900)));
+
+      expect(machine.repRomSpans, isEmpty);
+      expect(machine.romScore, 0.0);
+    });
+
+    test('records the angle excursion of a completed squat rep', () {
+      final machine = RepStateMachine(exercise: squat);
+      final t0 = DateTime(2026, 1, 1);
+
+      machine.feed(94, t0);
+      machine.feed(94, t0.add(const Duration(milliseconds: 900)));
+      machine.feed(169, t0.add(const Duration(milliseconds: 1800)));
+
+      expect(machine.repCount, 1);
+      expect(machine.repRomSpans, [75.0]); // 169° − 94°
+      expect(machine.romScore, closeTo(75 / 105, 1e-9));
+    });
+
+    test(
+      'a rep that only just clears the thresholds scores well under 1.0',
+      () {
+        final machine = RepStateMachine(exercise: squat);
+        final t0 = DateTime(2026, 1, 1);
+
+        machine.feed(94, t0);
+        machine.feed(94, t0.add(const Duration(milliseconds: 900)));
+        machine.feed(169, t0.add(const Duration(milliseconds: 1800)));
+
+        expect(machine.romScore, lessThan(0.75));
+      },
+    );
+
+    test('a full-depth rep clamps at 1.0', () {
+      final machine = RepStateMachine(exercise: squat);
+      final t0 = DateTime(2026, 1, 1);
+
+      machine.feed(60, t0); // deeper than the 70° ideal bottom
+      machine.feed(60, t0.add(const Duration(milliseconds: 900)));
+      machine.feed(178, t0.add(const Duration(milliseconds: 1800)));
+
+      expect(machine.repRomSpans, [118.0]); // exceeds the 105° ideal span
+      expect(machine.romScore, 1.0);
+    });
+
+    test('romScore averages across reps', () {
+      final machine = RepStateMachine(exercise: bicepCurl);
+      final t0 = DateTime(2026, 1, 1);
+
+      // Rep 1: 165° → 35° = 130°
+      machine.feed(165, t0);
+      machine.feed(165, t0.add(const Duration(milliseconds: 700)));
+      machine.feed(35, t0.add(const Duration(milliseconds: 1400)));
+      // Rep 2: 165° → 25° = 140°
+      machine.feed(165, t0.add(const Duration(milliseconds: 2100)));
+      machine.feed(25, t0.add(const Duration(milliseconds: 2800)));
+
+      expect(machine.repCount, 2);
+      expect(machine.repRomSpans, [130.0, 140.0]);
+      expect(machine.romScore, closeTo(135 / 140, 1e-9));
+    });
+
+    test('a rejected rep contributes no span', () {
+      final machine = RepStateMachine(exercise: squat);
+      final t0 = DateTime(2026, 1, 1);
+
+      // Shallow: never drops below the 95° bottom threshold.
+      machine.feed(110, t0);
+      machine.feed(110, t0.add(const Duration(milliseconds: 900)));
+      machine.feed(175, t0.add(const Duration(milliseconds: 1800)));
+
+      expect(machine.repCount, 0);
+      expect(machine.repRomSpans, isEmpty);
+    });
+
+    test('resetRepCount keeps spans, clearSetSamples drops them', () {
+      final machine = RepStateMachine(exercise: squat);
+      final t0 = DateTime(2026, 1, 1);
+
+      machine.feed(94, t0);
+      machine.feed(94, t0.add(const Duration(milliseconds: 900)));
+      machine.feed(169, t0.add(const Duration(milliseconds: 1800)));
+
+      machine.resetRepCount();
+      expect(machine.repRomSpans.length, 1);
+
+      machine.clearSetSamples();
+      expect(machine.repRomSpans, isEmpty);
+      expect(machine.repDurationsMs, isEmpty);
+      expect(machine.romScore, 0.0);
     });
   });
 }

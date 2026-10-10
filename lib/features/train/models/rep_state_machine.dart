@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'exercise.dart';
 
 /// FR-2.4: Hardened rep state machine — extracted from CameraView so the
@@ -24,12 +26,31 @@ class RepStateMachine {
   int repCount = 0;
   final List<int> repDurationsMs = [];
 
+  // FR-2.4 ROM: angle excursion of each completed rep, in degrees. Min and max
+  // accumulate across the rep window and close when the rep completes.
+  final List<double> repRomSpans = [];
+  double? _repMinAngle;
+  double? _repMaxAngle;
+
+  /// Mean per-rep excursion as a 0..1 fraction of [Exercise.romFullSpanDeg].
+  /// 0.0 until the first rep closes — no rep, no range of motion.
+  double get romScore {
+    if (repRomSpans.isEmpty) return 0.0;
+    final mean = repRomSpans.reduce((a, b) => a + b) / repRomSpans.length;
+    return (mean / exercise.romFullSpanDeg).clamp(0.0, 1.0);
+  }
+
   /// Feeds one confidence-checked angle sample with its timestamp.
   /// Returns true exactly when a rep completes.
   bool feed(double angle, DateTime now) {
+    // ROM sampling runs on every confidence-checked frame, so the span covers
+    // the whole descent and ascent rather than just the threshold crossings.
+    _repMinAngle = _repMinAngle == null ? angle : min(_repMinAngle!, angle);
+    _repMaxAngle = _repMaxAngle == null ? angle : max(_repMaxAngle!, angle);
+
     final bool atBottom;
     final bool atTop;
-    // The 
+    // The
     if (exercise.id == 'bicep_curl') {
       atBottom = angle > exercise.repBottomAngleStrict; // arm extended
       atTop = angle < exercise.repTopAngleStrict; // arm curled
@@ -53,6 +74,9 @@ class RepStateMachine {
         repDurationsMs.add(now.difference(_repStartTime!).inMilliseconds);
         _repStartTime = null;
       }
+      repRomSpans.add(_repMaxAngle! - _repMinAngle!);
+      _repMinAngle = null;
+      _repMaxAngle = null;
       repCount++;
       return true;
     } else {
@@ -69,6 +93,12 @@ class RepStateMachine {
   /// Called when the rest countdown starts — next set counts from zero.
   void resetRepCount() => repCount = 0;
 
-  /// Called after set metrics are captured — durations belong to that set.
-  void clearDurations() => repDurationsMs.clear();
+  /// Called after set metrics are captured — per-rep samples belong to the set
+  /// that just ended, not to the next one.
+  void clearSetSamples() {
+    repDurationsMs.clear();
+    repRomSpans.clear();
+    _repMinAngle = null;
+    _repMaxAngle = null;
+  }
 }

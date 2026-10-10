@@ -8,9 +8,9 @@ import '../../../core/constants/app_colors.dart';
 class FormGauge extends StatelessWidget {
   const FormGauge({
     super.key,
-    required this.angle,       // current measured joint angle in degrees, null = no pose
-    required this.minAngle,    // target range lower bound (good form)
-    required this.maxAngle,    // target range upper bound (good form)
+    required this.angle, // current measured joint angle in degrees, null = no pose
+    required this.minAngle, // target range lower bound (good form)
+    required this.maxAngle, // target range upper bound (good form)
     required this.visible,
     required this.onTap,
   });
@@ -66,12 +66,24 @@ class _GaugePainter extends CustomPainter {
     // Draw 3 arc segments.
     // Upper semicircle = start at pi (left), sweep +pi clockwise (through top to right).
     // Left red = 90°, orange = 60°, right red = 30° — orange sits right of centre.
-    const leftSweep  = pi / 2;           // 90°
-    const midSweep   = pi / 3;           // 60°
-    const rightSweep = pi / 6;           // 30°
-    _arc(canvas, arcRect, pi,                        leftSweep,  AppColors.error);     // left red
-    _arc(canvas, arcRect, pi + leftSweep,            midSweep,   AppColors.secondary); // orange
-    _arc(canvas, arcRect, pi + leftSweep + midSweep, rightSweep, AppColors.error);    // right red
+    const leftSweep = pi / 2; // 90°
+    const midSweep = pi / 3; // 60°
+    const rightSweep = pi / 6; // 30°
+    _arc(canvas, arcRect, pi, leftSweep, AppColors.error); // left red
+    _arc(
+      canvas,
+      arcRect,
+      pi + leftSweep,
+      midSweep,
+      AppColors.secondary,
+    ); // orange
+    _arc(
+      canvas,
+      arcRect,
+      pi + leftSweep + midSweep,
+      rightSweep,
+      AppColors.error,
+    ); // right red
 
     // Zone boundary tick marks
     _tick(canvas, center, radius, pi + leftSweep);
@@ -117,10 +129,14 @@ class _GaugePainter extends CustomPainter {
 
   void _tick(Canvas canvas, Offset center, double radius, double rad) {
     canvas.drawLine(
-      Offset(center.dx + (radius - 20) * cos(rad),
-             center.dy + (radius - 20) * sin(rad)),
-      Offset(center.dx + (radius + 4) * cos(rad),
-             center.dy + (radius + 4) * sin(rad)),
+      Offset(
+        center.dx + (radius - 20) * cos(rad),
+        center.dy + (radius - 20) * sin(rad),
+      ),
+      Offset(
+        center.dx + (radius + 4) * cos(rad),
+        center.dy + (radius + 4) * sin(rad),
+      ),
       Paint()
         ..color = Colors.white54
         ..strokeWidth = 2,

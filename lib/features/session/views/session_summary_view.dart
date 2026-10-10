@@ -14,10 +14,7 @@ import '../../train/models/set_metrics.dart';
 
 // Passed via GoRouter extra when navigating to /session/summary.
 class SessionSummaryData {
-  const SessionSummaryData({
-    required this.exerciseName,
-    required this.sets,
-  });
+  const SessionSummaryData({required this.exerciseName, required this.sets});
 
   final String exerciseName;
   final List<SetMetrics> sets;
@@ -33,8 +30,7 @@ class SessionSummaryView extends ConsumerStatefulWidget {
   final SessionSummaryData data;
 
   @override
-  ConsumerState<SessionSummaryView> createState() =>
-      _SessionSummaryViewState();
+  ConsumerState<SessionSummaryView> createState() => _SessionSummaryViewState();
 }
 
 class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
@@ -59,7 +55,9 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
     final profile =
         ref.read(profileProvider).value ?? UserProfileBiometrics.defaults;
 
-    ref.read(planProvider.notifier).generateAdaptivePlan(
+    ref
+        .read(planProvider.notifier)
+        .generateAdaptivePlan(
           exerciseName: widget.data.exerciseName,
           sets: widget.data.sets,
           biometrics: profile,
@@ -76,7 +74,9 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
     final summary =
         '${DateTime.now().toIso8601String()}|${widget.data.exerciseName} — ${widget.data.sets.map((s) => s.toHistorySummary()).join(' | ')}';
     history.add(summary);
-    final capped = history.length > 10 ? history.sublist(history.length - 10) : history;
+    final capped = history.length > 10
+        ? history.sublist(history.length - 10)
+        : history;
     await prefs.setStringList(_historyKey, capped);
 
     // Best-effort write to Supabase workout_sessions.
@@ -84,18 +84,25 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
       await SupabaseService().insertWorkoutSession(
         exerciseName: widget.data.exerciseName,
         setsCompleted: widget.data.sets.length,
-        sessionData: widget.data.sets.map((s) => {
-          'set': s.setNumber,
-          'reps': s.repsCompleted,
-          'form_score': s.formScore,
-          'fatigue_index': s.fatigueIndex,
-          'fatigue_label': s.fatigueLabel,
-          'tut_ms': s.tutMs,
-          'completed_at': s.completedAt.toIso8601String(),
-        }).toList(),
+        sessionData: widget.data.sets
+            .map(
+              (s) => {
+                'set': s.setNumber,
+                'reps': s.repsCompleted,
+                'form_score': s.formScore,
+                'fatigue_index': s.fatigueIndex,
+                'fatigue_label': s.fatigueLabel,
+                'tut_ms': s.tutMs,
+                'set_duration_ms': s.setDurationMs,
+                'rom_score': s.romScore,
+                'rep_rom_spans': s.repRomSpans,
+                'endurance_score': s.enduranceScore,
+                'completed_at': s.completedAt.toIso8601String(),
+              },
+            )
+            .toList(),
       );
-    } catch (_) {
-    }
+    } catch (_) {}
 
     if (mounted) context.go('/plan');
   }
@@ -108,54 +115,63 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
 
     return GradientBackground(
       child: Scaffold(
-      backgroundColor: Colors.transparent,
-      appBar: AppBar(
         backgroundColor: Colors.transparent,
-        elevation: 0,
-        automaticallyImplyLeading: false,
-        title: Text('Session Complete',
-            style: AppTextStyles.titleMedium.copyWith(color: AppColors.primary)),
-        centerTitle: true,
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          // ── Per-set breakdown ─────────────────────────────────────────────
-          Text('Set Breakdown',
-              style: AppTextStyles.titleMedium.copyWith(color: AppColors.primary)),
-          const SizedBox(height: 12),
-          _SetTable(sets: widget.data.sets),
-          const SizedBox(height: 28),
-
-          // ── AI plan status ────────────────────────────────────────────────
-          _PlanStatusBanner(planAsync: planAsync),
-          const SizedBox(height: 32),
-
-          // ── Continue button ───────────────────────────────────────────────
-          ElevatedButton(
-            onPressed: canContinue ? _saveAndViewPlan : null,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              disabledBackgroundColor: AppColors.border,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14)),
-            ),
-            child: Text(
-              _saving
-                  ? 'Saving…'
-                  : generating
-                      ? 'Generating Plan…'
-                      : 'View Your Plan →',
-              style: AppTextStyles.button.copyWith(
-                color: canContinue ? AppColors.background : AppColors.textMuted,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          automaticallyImplyLeading: false,
+          title: Text(
+            'Session Complete',
+            style: AppTextStyles.titleMedium.copyWith(color: AppColors.primary),
+          ),
+          centerTitle: true,
+        ),
+        body: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            // ── Per-set breakdown ─────────────────────────────────────────────
+            Text(
+              'Set Breakdown',
+              style: AppTextStyles.titleMedium.copyWith(
+                color: AppColors.primary,
               ),
             ),
-          ),
-          const SizedBox(height: 24),
-        ],
+            const SizedBox(height: 12),
+            _SetTable(sets: widget.data.sets),
+            const SizedBox(height: 28),
+
+            // ── AI plan status ────────────────────────────────────────────────
+            _PlanStatusBanner(planAsync: planAsync),
+            const SizedBox(height: 32),
+
+            // ── Continue button ───────────────────────────────────────────────
+            ElevatedButton(
+              onPressed: canContinue ? _saveAndViewPlan : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                disabledBackgroundColor: AppColors.border,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              child: Text(
+                _saving
+                    ? 'Saving…'
+                    : generating
+                    ? 'Generating Plan…'
+                    : 'View Your Plan →',
+                style: AppTextStyles.button.copyWith(
+                  color: canContinue
+                      ? AppColors.background
+                      : AppColors.textMuted,
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+          ],
+        ),
       ),
-    ),
     );
   }
 }
@@ -190,8 +206,11 @@ class _PlanStatusBanner extends StatelessWidget {
       ),
       error: (_, _) => Row(
         children: [
-          const Icon(Icons.warning_amber_rounded,
-              color: AppColors.error, size: 18),
+          const Icon(
+            Icons.warning_amber_rounded,
+            color: AppColors.error,
+            size: 18,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -203,13 +222,15 @@ class _PlanStatusBanner extends StatelessWidget {
       ),
       data: (_) => Row(
         children: [
-          const Icon(Icons.check_circle_outline_rounded,
-              color: AppColors.primary, size: 18),
+          const Icon(
+            Icons.check_circle_outline_rounded,
+            color: AppColors.primary,
+            size: 18,
+          ),
           const SizedBox(width: 8),
           Text(
             'Adaptive plan ready!',
-            style: AppTextStyles.bodyMedium
-                .copyWith(color: AppColors.primary),
+            style: AppTextStyles.bodyMedium.copyWith(color: AppColors.primary),
           ),
         ],
       ),
@@ -242,11 +263,12 @@ class _SetTable extends StatelessWidget {
       child: Column(
         children: [
           _TableRow(
-              set: 'SET',
-              reps: 'REPS',
-              form: 'FORM',
-              fatigue: 'FATIGUE',
-              isHeader: true),
+            set: 'SET',
+            reps: 'REPS',
+            form: 'FORM',
+            fatigue: 'FATIGUE',
+            isHeader: true,
+          ),
           Divider(color: AppColors.primary.withValues(alpha: 0.25), height: 1),
           ...sets.asMap().entries.map((e) {
             final s = e.value;
@@ -259,7 +281,10 @@ class _SetTable extends StatelessWidget {
                   fatigue: s.fatigueLabel,
                 ),
                 if (e.key < sets.length - 1)
-                  Divider(color: AppColors.primary.withValues(alpha: 0.15), height: 1),
+                  Divider(
+                    color: AppColors.primary.withValues(alpha: 0.15),
+                    height: 1,
+                  ),
               ],
             );
           }),
@@ -284,30 +309,44 @@ class _TableRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final base = isHeader ? AppTextStyles.caption : AppTextStyles.bodyMedium;
-    final muted = isHeader ? AppColors.primary.withValues(alpha: 0.7) : AppColors.textPrimary;
+    final muted = isHeader
+        ? AppColors.primary.withValues(alpha: 0.7)
+        : AppColors.textPrimary;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       child: Row(
         children: [
           Expanded(
-              child: Text(set,
-                  style: base.copyWith(color: muted),
-                  textAlign: TextAlign.center)),
+            child: Text(
+              set,
+              style: base.copyWith(color: muted),
+              textAlign: TextAlign.center,
+            ),
+          ),
           Expanded(
-              child: Text(reps,
-                  style: base.copyWith(color: muted),
-                  textAlign: TextAlign.center)),
+            child: Text(
+              reps,
+              style: base.copyWith(color: muted),
+              textAlign: TextAlign.center,
+            ),
+          ),
           Expanded(
-              child: Text(form,
-                  style: base.copyWith(
-                      color: isHeader ? muted : _formColor(form)),
-                  textAlign: TextAlign.center)),
+            child: Text(
+              form,
+              style: base.copyWith(color: isHeader ? muted : _formColor(form)),
+              textAlign: TextAlign.center,
+            ),
+          ),
           Expanded(
-              child: Text(fatigue,
-                  style: base.copyWith(
-                      color: isHeader ? muted : _fatigueColor(fatigue)),
-                  textAlign: TextAlign.center)),
+            child: Text(
+              fatigue,
+              style: base.copyWith(
+                color: isHeader ? muted : _fatigueColor(fatigue),
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
         ],
       ),
     );

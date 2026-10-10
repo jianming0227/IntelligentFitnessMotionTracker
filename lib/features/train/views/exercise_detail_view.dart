@@ -155,16 +155,13 @@ class _InfoPanel extends StatelessWidget {
 
     return Container(
       // Roughly 55% of viewport so it leaves space for the hero on top.
-      constraints: BoxConstraints(
-        maxHeight: mq.size.height * 0.58,
-      ),
+      constraints: BoxConstraints(maxHeight: mq.size.height * 0.58),
       decoration: BoxDecoration(
         color: cs.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
       ),
       child: Padding(
-        padding:
-            EdgeInsets.fromLTRB(24, 28, 24, 20 + mq.padding.bottom),
+        padding: EdgeInsets.fromLTRB(24, 28, 24, 20 + mq.padding.bottom),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -200,16 +197,14 @@ class _InfoPanel extends StatelessWidget {
                   child: _StatPill(
                     icon: Icons.local_fire_department_rounded,
                     label: 'Burn',
-                    value:
-                        '${(exercise.targetAngleMax * 2.5).round()} kcal',
+                    value: '${(exercise.targetAngleMax * 2.5).round()} kcal',
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 18),
             ElevatedButton(
-              onPressed: () =>
-                  context.push('/train/camera', extra: exercise),
+              onPressed: () => context.push('/train/camera', extra: exercise),
               child: const Text("LET'S WORKOUT"),
             ),
           ],
@@ -257,11 +252,17 @@ class _StatPill extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(label,
-                  style: tt.bodyMedium
-                      ?.copyWith(fontSize: 11, letterSpacing: 0.4)),
-              Text(value,
-                  style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+              Text(
+                label,
+                style: tt.bodyMedium?.copyWith(
+                  fontSize: 11,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              Text(
+                value,
+                style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+              ),
             ],
           ),
         ],

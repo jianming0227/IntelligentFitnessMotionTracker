@@ -17,18 +17,18 @@ class PosePainter extends CustomPainter {
 
   // FR-2.1: Skeleton connections — each tuple is one bone segment (joint A → joint B)
   static const _bones = [
-    (PoseLandmarkType.leftShoulder,  PoseLandmarkType.rightShoulder),
-    (PoseLandmarkType.leftShoulder,  PoseLandmarkType.leftElbow),
-    (PoseLandmarkType.leftElbow,     PoseLandmarkType.leftWrist),
+    (PoseLandmarkType.leftShoulder, PoseLandmarkType.rightShoulder),
+    (PoseLandmarkType.leftShoulder, PoseLandmarkType.leftElbow),
+    (PoseLandmarkType.leftElbow, PoseLandmarkType.leftWrist),
     (PoseLandmarkType.rightShoulder, PoseLandmarkType.rightElbow),
-    (PoseLandmarkType.rightElbow,    PoseLandmarkType.rightWrist),
-    (PoseLandmarkType.leftShoulder,  PoseLandmarkType.leftHip),
+    (PoseLandmarkType.rightElbow, PoseLandmarkType.rightWrist),
+    (PoseLandmarkType.leftShoulder, PoseLandmarkType.leftHip),
     (PoseLandmarkType.rightShoulder, PoseLandmarkType.rightHip),
-    (PoseLandmarkType.leftHip,       PoseLandmarkType.rightHip),
-    (PoseLandmarkType.leftHip,       PoseLandmarkType.leftKnee),
-    (PoseLandmarkType.leftKnee,      PoseLandmarkType.leftAnkle),
-    (PoseLandmarkType.rightHip,      PoseLandmarkType.rightKnee),
-    (PoseLandmarkType.rightKnee,     PoseLandmarkType.rightAnkle),
+    (PoseLandmarkType.leftHip, PoseLandmarkType.rightHip),
+    (PoseLandmarkType.leftHip, PoseLandmarkType.leftKnee),
+    (PoseLandmarkType.leftKnee, PoseLandmarkType.leftAnkle),
+    (PoseLandmarkType.rightHip, PoseLandmarkType.rightKnee),
+    (PoseLandmarkType.rightKnee, PoseLandmarkType.rightAnkle),
   ];
 
   @override

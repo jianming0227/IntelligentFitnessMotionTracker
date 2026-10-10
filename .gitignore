@@ -51,7 +51,10 @@ app.*.map.json
 # plugins
 .understand-anything
 
-Requirements.md
-TRACKER.md
-SUBMISSION.md
+# Local-only docs — every .md lives in docs/ and stays off GitHub.
+# README.md (repo landing page) and docs/screenshots/*.png stay tracked.
+docs/**/*.md
+docs/reports/
 flutter_*.png
+
+.vscode

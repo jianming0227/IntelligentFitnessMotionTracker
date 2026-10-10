@@ -100,7 +100,10 @@ class _CoachingSheetState extends ConsumerState<CoachingSheet> {
                 highlight: true,
               ),
               const SizedBox(width: 8),
-              _MetricChip(label: 'Reps', value: '${widget.metrics.repsCompleted}'),
+              _MetricChip(
+                label: 'Reps',
+                value: '${widget.metrics.repsCompleted}',
+              ),
               const SizedBox(width: 8),
               _MetricChip(label: 'Form', value: widget.metrics.formPercent),
               const SizedBox(width: 8),
@@ -120,8 +123,11 @@ class _CoachingSheetState extends ConsumerState<CoachingSheet> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.auto_awesome,
-                    color: AppColors.primary, size: 18),
+                const Icon(
+                  Icons.auto_awesome,
+                  color: AppColors.primary,
+                  size: 18,
+                ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: _text.isEmpty
@@ -141,7 +147,8 @@ class _CoachingSheetState extends ConsumerState<CoachingSheet> {
               disabledBackgroundColor: AppColors.border,
               padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14)),
+                borderRadius: BorderRadius.circular(14),
+              ),
             ),
             child: Text(
               _done ? 'Continue' : 'Coach is thinking…',
@@ -176,7 +183,8 @@ class _MetricChip extends StatelessWidget {
               : AppColors.background,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-              color: highlight ? AppColors.primary : AppColors.border),
+            color: highlight ? AppColors.primary : AppColors.border,
+          ),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -192,8 +200,7 @@ class _MetricChip extends StatelessWidget {
                 maxLines: 1,
               ),
             ),
-            if (value.isNotEmpty)
-              Text(label, style: AppTextStyles.caption),
+            if (value.isNotEmpty) Text(label, style: AppTextStyles.caption),
           ],
         ),
       ),

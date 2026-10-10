@@ -13,16 +13,17 @@ import '../features/train/models/set_metrics.dart';
 ///                GenerationConfig(responseMimeType: 'application/json')).
 class GeminiService {
   GeminiService()
-      : _textModel = GenerativeModel(
-          model: 'gemini-3.1-flash-lite',
-          apiKey: dotenv.env['GEMINI_API_KEY']!,
+    : _textModel = GenerativeModel(
+        model: 'gemini-3.1-flash-lite',
+        apiKey: dotenv.env['GEMINI_API_KEY']!,
+      ),
+      _jsonModel = GenerativeModel(
+        model: 'gemini-3.1-flash-lite',
+        apiKey: dotenv.env['GEMINI_API_KEY']!,
+        generationConfig: GenerationConfig(
+          responseMimeType: 'application/json',
         ),
-        _jsonModel = GenerativeModel(
-          model: 'gemini-3.1-flash-lite',
-          apiKey: dotenv.env['GEMINI_API_KEY']!,
-          generationConfig:
-              GenerationConfig(responseMimeType: 'application/json'),
-        );
+      );
 
   final GenerativeModel _textModel;
   final GenerativeModel _jsonModel;
@@ -31,8 +32,7 @@ class GeminiService {
   Stream<String> streamSetCoaching({
     required String exerciseName,
     required SetMetrics metrics,
-  }) =>
-      _stream(_textModel, _buildSetPrompt(exerciseName, metrics));
+  }) => _stream(_textModel, _buildSetPrompt(exerciseName, metrics));
 
   /// FR-3.2: Streams a JSON adaptive plan based on session metrics + biometrics.
   /// [currentLocalTime] anchors all generated `date` / `time` fields so the
@@ -44,17 +44,16 @@ class GeminiService {
     required List<String> previousSessionSummaries,
     required UserProfileBiometrics biometrics,
     required DateTime currentLocalTime,
-  }) =>
-      _stream(
-        _jsonModel,
-        _buildSessionPrompt(
-          exerciseName,
-          sets,
-          previousSessionSummaries,
-          biometrics,
-          currentLocalTime,
-        ),
-      );
+  }) => _stream(
+    _jsonModel,
+    _buildSessionPrompt(
+      exerciseName,
+      sets,
+      previousSessionSummaries,
+      biometrics,
+      currentLocalTime,
+    ),
+  );
 
   Stream<String> _stream(GenerativeModel model, String prompt) async* {
     final responses = model.generateContentStream([Content.text(prompt)]);
@@ -64,10 +63,16 @@ class GeminiService {
     }
   }
 
-  String _buildSetPrompt(String exerciseName, SetMetrics m) => '''
+  String _buildSetPrompt(String exerciseName, SetMetrics m) =>
+      '''
 You are a concise fitness coach. The user just completed Set ${m.setNumber} of $exerciseName.
 Results: ${m.repsCompleted} reps | Form: ${m.formPercent} | Fatigue: ${m.fatigueLabel}
+Range of motion: ${m.romPercent} of a full-range rep | Time under tension: ${m.tutLabel} (${(m.tutRatio * 100).round()}% of the set)
+Endurance (ROM x TUT composite): ${m.endurancePercent} — ${m.enduranceLabel}
 Rep durations (ms): ${m.repDurationsMs.join(', ')}
+Per-rep excursion (degrees): ${m.repRomSpans.map((d) => d.round()).join(', ')}
+
+If range of motion is under 75%, the tip must be about rep depth, not speed or effort.
 
 Give 2–3 sentences of specific, motivating feedback. Note one thing they did well and one actionable tip for their next set. Under 50 words.
 ''';
@@ -80,17 +85,19 @@ Give 2–3 sentences of specific, motivating feedback. Note one thing they did w
     DateTime now,
   ) {
     final setLines = sets
-        .map((s) =>
-            '  Set ${s.setNumber}: ${s.repsCompleted} reps | Form: ${s.formPercent} | Fatigue: ${s.fatigueLabel} | TUT: ${s.tutLabel}')
+        .map(
+          (s) =>
+              '  Set ${s.setNumber}: ${s.repsCompleted} reps | Form: ${s.formPercent} | Fatigue: ${s.fatigueLabel} | TUT: ${s.tutLabel} | ROM: ${s.romPercent} | Endurance: ${s.endurancePercent} (${s.enduranceLabel})',
+        )
         .join('\n');
 
     final historySection = history.isEmpty
         ? '  No previous sessions — this is their first session.'
         : history
-            .asMap()
-            .entries
-            .map((e) => '  Session ${e.key + 1}: ${e.value}')
-            .join('\n');
+              .asMap()
+              .entries
+              .map((e) => '  Session ${e.key + 1}: ${e.value}')
+              .join('\n');
 
     // Compute three concrete dates so the model has unambiguous anchors and
     // never has to guess what "tomorrow" means relative to a date string.
@@ -101,8 +108,18 @@ Give 2–3 sentences of specific, motivating feedback. Note one thing they did w
     String fmt(DateTime d) {
       const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
       const months = [
-        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
       ];
       return '${weekdays[d.weekday - 1]}, ${months[d.month - 1]} ${d.day}';
     }
