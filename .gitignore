@@ -58,3 +58,6 @@ docs/reports/
 flutter_*.png
 
 .vscode
+
+# Root pointer to docs/CLAUDE.md, local only like the rest of the docs.
+CLAUDE.md

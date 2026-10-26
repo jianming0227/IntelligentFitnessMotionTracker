@@ -13,6 +13,7 @@ import '../../session/views/session_summary_view.dart';
 import '../models/exercise.dart';
 import '../models/rep_state_machine.dart';
 import '../models/set_metrics.dart';
+import '../models/side_selector.dart';
 import '../widgets/coaching_sheet.dart';
 import '../widgets/endurance_bar.dart';
 import '../widgets/form_gauge.dart';
@@ -47,6 +48,8 @@ class _CameraViewState extends State<CameraView> {
     exercise: widget.exercise,
   );
   int get _repCount => _repMachine.repCount;
+  // B2: reads angles from whichever side faces the camera (pure Dart, tested).
+  final SideSelector _sideSelector = SideSelector();
   int _currentSet = 1;
   static const int _totalSets = 3;
   static const int _targetReps = 10;
@@ -347,26 +350,46 @@ class _CameraViewState extends State<CameraView> {
   /// they can't toggle the rep state machine.
   /// if bicep curl, else squat
   double? _jointAngle(Pose pose) {
-    if (widget.exercise.id == 'bicep_curl') return _elbowAngle(pose);
-    return _kneeAngle(pose);
+    final isCurl = widget.exercise.id == 'bicep_curl';
+    // Squat: hip → knee → ankle. Bicep curl: shoulder → elbow → wrist.
+    final left = isCurl
+        ? const [
+            PoseLandmarkType.leftShoulder,
+            PoseLandmarkType.leftElbow,
+            PoseLandmarkType.leftWrist,
+          ]
+        : const [
+            PoseLandmarkType.leftHip,
+            PoseLandmarkType.leftKnee,
+            PoseLandmarkType.leftAnkle,
+          ];
+    final right = isCurl
+        ? const [
+            PoseLandmarkType.rightShoulder,
+            PoseLandmarkType.rightElbow,
+            PoseLandmarkType.rightWrist,
+          ]
+        : const [
+            PoseLandmarkType.rightHip,
+            PoseLandmarkType.rightKnee,
+            PoseLandmarkType.rightAnkle,
+          ];
+
+    final leftLms = [for (final t in left) pose.landmarks[t]];
+    final rightLms = [for (final t in right) pose.landmarks[t]];
+    final side = _sideSelector.feed(
+      _meanLikelihood(leftLms),
+      _meanLikelihood(rightLms),
+    );
+    final lms = side == BodySide.left ? leftLms : rightLms;
+    // Return null if the confidence was below threshold
+    if (!_landmarksConfident(lms)) return null;
+    return _angleAt(lms[0]!, lms[1]!, lms[2]!);
   }
 
-  double? _kneeAngle(Pose pose) {
-    final hip = pose.landmarks[PoseLandmarkType.leftHip];
-    final knee = pose.landmarks[PoseLandmarkType.leftKnee];
-    final ankle = pose.landmarks[PoseLandmarkType.leftAnkle];
-    // Return null if the confident was below threshold
-    if (!_landmarksConfident([hip, knee, ankle])) return null;
-    return _angleAt(hip!, knee!, ankle!);
-  }
-
-  double? _elbowAngle(Pose pose) {
-    final shoulder = pose.landmarks[PoseLandmarkType.leftShoulder];
-    final elbow = pose.landmarks[PoseLandmarkType.leftElbow];
-    final wrist = pose.landmarks[PoseLandmarkType.leftWrist];
-    if (!_landmarksConfident([shoulder, elbow, wrist])) return null;
-    return _angleAt(shoulder!, elbow!, wrist!);
-  }
+  // Missing landmarks count as zero so a side ML Kit didn't return never wins.
+  double _meanLikelihood(List<PoseLandmark?> lms) =>
+      lms.fold(0.0, (sum, l) => sum + (l?.likelihood ?? 0.0)) / lms.length;
 
   //The pure math logic of calculation of angle
   double _angleAt(PoseLandmark a, PoseLandmark b, PoseLandmark c) {
@@ -568,6 +591,7 @@ class _CameraViewState extends State<CameraView> {
     _setStartTime = DateTime.now();
     _setElapsed = Duration.zero;
     _repMachine.resetPhase();
+    _sideSelector.reset();
     _setTicker?.cancel();
     _setTicker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted || _setStartTime == null) return;
