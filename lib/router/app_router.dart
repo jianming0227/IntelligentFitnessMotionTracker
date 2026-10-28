@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/providers/demo_mode_provider.dart';
+import '../core/utils/app_log.dart';
 import '../features/auth/views/login_view.dart';
 import '../features/auth/views/register_view.dart';
 import '../features/home/views/home_view.dart';
@@ -37,7 +38,7 @@ class GoRouterRefreshStream extends ChangeNotifier {
 }
 
 final routerProvider = Provider<GoRouter>((ref) {
-  return GoRouter(
+  final router = GoRouter(
     initialLocation: '/home',
     refreshListenable: GoRouterRefreshStream(
       Supabase.instance.client.auth.onAuthStateChange,
@@ -90,4 +91,18 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
     ],
   );
+
+  // One log line per screen change. The delegate also notifies on rebuilds
+  // that keep the same location, so only log when the path actually changes.
+  String? lastPath;
+  void logNav() {
+    final path = router.routerDelegate.currentConfiguration.uri.path;
+    if (path.isEmpty || path == lastPath) return;
+    lastPath = path;
+    AppLog.info('Nav', path);
+  }
+
+  router.routerDelegate.addListener(logNav);
+  ref.onDispose(() => router.routerDelegate.removeListener(logNav));
+  return router;
 });

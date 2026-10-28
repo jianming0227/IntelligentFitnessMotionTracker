@@ -1,6 +1,8 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/utils/app_log.dart';
+
 // FR-1.1: Central auth service — wraps Supabase email/password auth operations.
 class SupabaseService {
   final SupabaseClient _client = Supabase.instance.client;
@@ -96,7 +98,10 @@ class SupabaseService {
     required List<Map<String, dynamic>> sessionData,
   }) async {
     final userId = currentUser?.id;
-    if (userId == null) return;
+    if (userId == null) {
+      AppLog.warn('Supabase', 'Session not saved: no signed-in user (demo?)');
+      return;
+    }
     await _client.from('workout_sessions').insert({
       'user_id': userId,
       'exercise_type': exerciseName,
@@ -104,5 +109,6 @@ class SupabaseService {
       'session_data': sessionData,
       'created_at': DateTime.now().toIso8601String(),
     });
+    AppLog.ok('Supabase', 'Session saved: $exerciseName, $setsCompleted sets');
   }
 }

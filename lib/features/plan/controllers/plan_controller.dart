@@ -1,12 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/utils/app_log.dart';
 import '../../../services/gemini_service.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../profile/models/user_profile_biometrics.dart';
@@ -31,7 +31,8 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
     if (raw == null) return null;
     try {
       return jsonDecode(raw) as Map<String, dynamic>;
-    } catch (_) {
+    } catch (e) {
+      AppLog.warn('Plan', 'Saved plan unreadable, starting empty: $e');
       return null;
     }
   }
@@ -54,6 +55,8 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
 
     //4.  Retry for two time to call Stream function and write to storage
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      AppLog.info('Plan', 'Generating plan for $exerciseName '
+          '(attempt $attempt/$maxAttempts)');
       try {
         final parsed = await _streamAndParsePlan(
           exerciseName: exerciseName,
@@ -75,18 +78,21 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
               .read(supabaseServiceProvider)
               .upsertPlan(planJson: parsed, exerciseName: exerciseName);
         } catch (e) {
-          debugPrint('[PlanController] Supabase upsert skipped: $e');
+          AppLog.warn('Plan', 'Supabase upsert skipped: $e');
         }
         /// 6. Change the state and ref.read will change the ui
         state = AsyncValue.data(parsed);
+        AppLog.ok('Plan', 'Plan generated and saved');
         return;
       } catch (e, st) {
         lastError = e;
         lastStack = st;
-        debugPrint(
-            '[PlanController] generate attempt $attempt/$maxAttempts failed: $e');
+        AppLog.error('Plan', 'Attempt $attempt/$maxAttempts failed', e);
       }
     }
+    AppLog.error('Plan', 'All attempts failed: '
+        '${previous != null ? 'keeping previous plan' : 'no plan to show'}',
+        lastError, lastStack);
 
     // All attempts failed. Never blank-wipe a working plan: if one already
     // exists, keep it on screen. Only surface an error when there is nothing
@@ -162,7 +168,7 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
     try {
       await ref.read(supabaseServiceProvider).deletePlan();
     } catch (e) {
-      debugPrint('[PlanController] Supabase delete skipped: $e');
+      AppLog.warn('Plan', 'Supabase delete skipped: $e');
     }
     state = const AsyncValue.data(null);
   }
@@ -174,9 +180,9 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
       const encoder = JsonEncoder.withIndent('  ');
       final pretty = encoder.convert(jsonDecode(jsonString));
       await file.writeAsString(pretty, flush: true);
-      debugPrint('[PlanController] Plan JSON written to: ${file.path}');
+      AppLog.ok('Plan', 'Plan JSON written to: ${file.path}');
     } catch (e) {
-      debugPrint('[PlanController] File write failed: $e');
+      AppLog.warn('Plan', 'File write failed: $e');
     }
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../core/utils/app_log.dart';
 import '../../../services/supabase_service.dart';
 
 // A provider that creates and exposes a single SupabaseService instance
@@ -28,6 +29,7 @@ class AuthController extends AsyncNotifier<void> {
       final service = ref.read(supabaseServiceProvider);
       await service.signIn(email: email, password: password);
     });
+    _log('Sign-in');
   }
 
   Future<void> signUp({
@@ -39,6 +41,7 @@ class AuthController extends AsyncNotifier<void> {
       final service = ref.read(supabaseServiceProvider);
       await service.signUp(email: email, password: password);
     });
+    _log('Sign-up');
   }
 
   Future<void> signOut() async {
@@ -47,6 +50,16 @@ class AuthController extends AsyncNotifier<void> {
       final service = ref.read(supabaseServiceProvider);
       await service.signOut();
     });
+    _log('Sign-out');
+  }
+
+  // Email and password are never logged — only the outcome.
+  void _log(String action) {
+    if (state.hasError) {
+      AppLog.error('Auth', '$action failed', state.error, state.stackTrace);
+    } else {
+      AppLog.ok('Auth', '$action succeeded');
+    }
   }
 }
 

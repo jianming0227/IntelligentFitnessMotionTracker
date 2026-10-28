@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
+import '../../../core/utils/app_log.dart';
 import '../../../services/gemini_service.dart';
 import '../models/set_metrics.dart';
 
@@ -39,6 +40,7 @@ class _CoachingSheetState extends ConsumerState<CoachingSheet> {
   }
 
   void _startStream() {
+    AppLog.info('Gemini', 'Set ${widget.metrics.setNumber} coaching requested');
     _sub = ref
         .read(geminiServiceProvider)
         .streamSetCoaching(
@@ -47,11 +49,17 @@ class _CoachingSheetState extends ConsumerState<CoachingSheet> {
         )
         .listen(
           (chunk) => setState(() => _text += chunk),
-          onDone: () => setState(() => _done = true),
-          onError: (_) => setState(() {
-            _text = 'Great effort! Keep that energy for the next set.';
-            _done = true;
-          }),
+          onDone: () {
+            AppLog.ok('Gemini', 'Coaching streamed (${_text.length} chars)');
+            setState(() => _done = true);
+          },
+          onError: (Object e, StackTrace st) {
+            AppLog.error('Gemini', 'Coaching failed, showing fallback', e, st);
+            setState(() {
+              _text = 'Great effort! Keep that energy for the next set.';
+              _done = true;
+            });
+          },
         );
   }
 

@@ -9,6 +9,7 @@ import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../core/utils/app_log.dart';
 import '../../session/views/session_summary_view.dart';
 import '../models/exercise.dart';
 import '../models/rep_state_machine.dart';
@@ -41,6 +42,7 @@ class _CameraViewState extends State<CameraView> {
   );
   bool _isDetecting = false;
   List<Pose> _poses = [];
+  int _frameErrors = 0;
 
   // ── FR-2.4: Rep counter state ───────────────────────────────────────────────
   // Counting logic lives in RepStateMachine (pure Dart, unit-tested).
@@ -101,6 +103,7 @@ class _CameraViewState extends State<CameraView> {
   // Phase 2: body confirmed → hand gesture prompt unlocks.
   bool _bodyInFrame = false;
   bool _bodyTtsSpoken = false; // prevents repeating "show hand" on re-entry
+  DateTime? _lastFrameWaitLogAt;
 
   // ── Mid-session body tracking ────────────────────────────────────────────────
   bool _bodyLostDuringSession = false;
@@ -139,11 +142,15 @@ class _CameraViewState extends State<CameraView> {
 
     final status = await Permission.camera.request();
     if (!status.isGranted) {
+      AppLog.warn('Camera', 'Permission ${status.name}, camera not started');
       if (mounted) setState(() => _permissionDenied = true);
       return;
     }
     _cameras = await availableCameras();
-    if (_cameras.isEmpty) return;
+    if (_cameras.isEmpty) {
+      AppLog.error('Camera', 'No cameras found on device');
+      return;
+    }
 
     _cameraIndex = _cameras.indexWhere(
       (c) => c.lensDirection == CameraLensDirection.front,
@@ -169,6 +176,11 @@ class _CameraViewState extends State<CameraView> {
     await ctrl.initialize();
     if (!mounted) return;
     await ctrl.startImageStream(_processFrame);
+    AppLog.ok(
+      'Camera',
+      'Opened ${_cameras[_cameraIndex].lensDirection.name} camera '
+          'for ${widget.exercise.name}',
+    );
     setState(() {});
   }
 
@@ -211,6 +223,7 @@ class _CameraViewState extends State<CameraView> {
         } else if (angle != null) {
           // Body confirmed — clear lost state on transition.
           if (_bodyLostDuringSession) {
+            AppLog.ok('Camera', 'Body back in frame, tracking resumed');
             setState(() => _bodyLostDuringSession = false);
           }
           _totalFrames++;
@@ -235,6 +248,7 @@ class _CameraViewState extends State<CameraView> {
           _tutZoneEnteredAt = null;
           if (!_bodyLostDuringSession) {
             _bodyLostDuringSession = true;
+            AppLog.warn('Camera', 'Body lost mid-set at rep $_repCount');
             if (_ttsEnabled) {
               _tts.speak('Step back. Keep your full body visible to continue');
             }
@@ -246,8 +260,15 @@ class _CameraViewState extends State<CameraView> {
         _poses = poses;
         _currentAngle = angle;
       });
-    } catch (_) {
-      // silently skip unprocessable frames
+    } catch (e, st) {
+      // Skip unprocessable frames. Runs ~30x a second, so log the first error
+      // in full and then only a running count to avoid flooding the console.
+      _frameErrors++;
+      if (_frameErrors == 1) {
+        AppLog.error('Camera', 'Frame processing failed', e, st);
+      } else if (_frameErrors % 100 == 0) {
+        AppLog.warn('Camera', '$_frameErrors frames failed so far (last: $e)');
+      }
     } finally {
       _isDetecting = false;
     }
@@ -329,7 +350,29 @@ class _CameraViewState extends State<CameraView> {
     // the exercise joints — so ML Kit's extrapolated off-screen guesses can't
     // trigger a false "Full body detected"; (2) the exercise-specific angle must
     // also be computable so the movement is actually trackable.
-    final inFrame = _fullBodyVisible(pose) && _jointAngle(pose) != null;
+    final fullBody = _fullBodyVisible(pose);
+    final inFrame = fullBody && _jointAngle(pose) != null;
+
+    // Throttled hint while stuck at this gate — says which check is failing.
+    if (!inFrame) {
+      final now = DateTime.now();
+      if (_lastFrameWaitLogAt == null ||
+          now.difference(_lastFrameWaitLogAt!).inSeconds >= 5) {
+        _lastFrameWaitLogAt = now;
+        AppLog.info(
+          'Camera',
+          fullBody
+              ? 'Waiting: body visible but exercise joints low-confidence'
+              : 'Waiting: full body (nose to ankles) not in frame',
+        );
+      }
+    }
+
+    if (inFrame != _bodyInFrame) {
+      inFrame
+          ? AppLog.ok('Camera', 'Full body detected, waiting for open hand')
+          : AppLog.warn('Camera', 'Body left frame before start');
+    }
 
     if (inFrame && !_bodyTtsSpoken) {
       _bodyTtsSpoken = true;
@@ -377,10 +420,18 @@ class _CameraViewState extends State<CameraView> {
 
     final leftLms = [for (final t in left) pose.landmarks[t]];
     final rightLms = [for (final t in right) pose.landmarks[t]];
-    final side = _sideSelector.feed(
-      _meanLikelihood(leftLms),
-      _meanLikelihood(rightLms),
-    );
+    final leftConf = _meanLikelihood(leftLms);
+    final rightConf = _meanLikelihood(rightLms);
+    final wasLocked = _sideSelector.isLocked;
+    final side = _sideSelector.feed(leftConf, rightConf);
+    if (!wasLocked && _sideSelector.isLocked) {
+      AppLog.info(
+        'Side',
+        'Locked ${side.name.toUpperCase()} '
+            '(last frame L ${leftConf.toStringAsFixed(2)} / '
+            'R ${rightConf.toStringAsFixed(2)})',
+      );
+    }
     final lms = side == BodySide.left ? leftLms : rightLms;
     // Return null if the confidence was below threshold
     if (!_landmarksConfident(lms)) return null;
@@ -538,6 +589,7 @@ class _CameraViewState extends State<CameraView> {
     _setElapsedSnapshot = _setElapsed;
     _setTicker?.cancel();
     setState(() => _userPaused = true);
+    AppLog.info('Gesture', 'Paused by high-five (rep $_repCount)');
     if (_ttsEnabled) _tts.speak('Session paused');
   }
 
@@ -550,16 +602,23 @@ class _CameraViewState extends State<CameraView> {
       setState(() => _setElapsed = DateTime.now().difference(_setStartTime!));
     });
     setState(() => _userPaused = false);
+    AppLog.info('Gesture', 'Resumed by open hand');
     if (_ttsEnabled) _tts.speak('Resuming. Go!');
   }
 
   void _checkGesture(Pose pose) {
     if (!_isOpenHand(pose)) {
+      if (_gestureStartAt != null) {
+        AppLog.warn('Gesture', 'Open hand dropped before 3 s, countdown reset');
+      }
       _gestureStartAt = null;
       _gestureCountdown = 3;
       return;
     }
     final now = DateTime.now();
+    if (_gestureStartAt == null) {
+      AppLog.info('Gesture', 'Open hand seen, hold 3 s to start');
+    }
     _gestureStartAt ??= now;
     final elapsed = now.difference(_gestureStartAt!).inSeconds;
     _gestureCountdown = (3 - elapsed).clamp(0, 3);
@@ -592,6 +651,8 @@ class _CameraViewState extends State<CameraView> {
     _setElapsed = Duration.zero;
     _repMachine.resetPhase();
     _sideSelector.reset();
+    AppLog.info('Camera', 'Set $_currentSet/$_totalSets started '
+        '(${widget.exercise.name})');
     _setTicker?.cancel();
     _setTicker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted || _setStartTime == null) return;
@@ -629,6 +690,12 @@ class _CameraViewState extends State<CameraView> {
     );
 
     _completedSets.add(metrics);
+    AppLog.ok(
+      'Camera',
+      'Set $_currentSet done: $_repCount reps, '
+          'form ${(formScore * 100).round()}%, '
+          'fatigue ${fatigueIndex.toStringAsFixed(2)}',
+    );
 
     _greenFrames = 0;
     _totalFrames = 0;

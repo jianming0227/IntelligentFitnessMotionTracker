@@ -61,3 +61,6 @@ flutter_*.png
 
 # Root pointer to docs/CLAUDE.md, local only like the rest of the docs.
 CLAUDE.md
+
+# Local launch helper with this machine's phone IP.
+run.ps1

@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
+import '../../../core/utils/app_log.dart';
 import '../../../core/widgets/gradient_background.dart';
 import '../../../services/supabase_service.dart';
 import '../../plan/controllers/plan_controller.dart';
@@ -102,7 +103,9 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
             )
             .toList(),
       );
-    } catch (_) {}
+    } catch (e, st) {
+      AppLog.error('Supabase', 'Session save failed', e, st);
+    }
 
     if (mounted) context.go('/plan');
   }

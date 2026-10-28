@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/utils/app_log.dart';
 import '../../../services/supabase_service.dart';
 import '../models/user_profile_biometrics.dart';
 
@@ -59,7 +60,9 @@ class ProfileController extends AsyncNotifier<UserProfileBiometrics?> {
         await prefs.setString(_keyLevel, profile.experienceLevel);
         return profile;
       }
-    } catch (_) {}
+    } catch (e) {
+      AppLog.warn('Profile', 'Supabase profile fetch failed: $e');
+    }
 
     return null;
   }
@@ -101,9 +104,9 @@ class ProfileController extends AsyncNotifier<UserProfileBiometrics?> {
           fitnessGoal: fitnessGoal,
           experienceLevel: experienceLevel,
         );
+        AppLog.ok('Profile', 'Profile synced to Supabase');
       } catch (e) {
-        // ignore: avoid_print
-        print('[ProfileController] Supabase upsert failed: $e');
+        AppLog.warn('Profile', 'Supabase upsert failed: $e');
       }
     }
   }
