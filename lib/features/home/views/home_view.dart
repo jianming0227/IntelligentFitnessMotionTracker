@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_text_styles.dart';
 import '../../../core/providers/theme_mode_provider.dart';
+import '../../../core/utils/display_name.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../profile/providers/profile_providers.dart';
 import '../../train/models/exercise.dart';
@@ -21,16 +22,8 @@ class HomeView extends ConsumerWidget {
     return 'Good Evening';
   }
 
-  String _displayName(WidgetRef ref) {
-    final email = ref.read(supabaseServiceProvider).currentUser?.email;
-    if (email == null || email.isEmpty) return 'Athlete';
-    final handle = email.split('@').first;
-    return handle
-        .split(RegExp(r'[._-]'))
-        .where((s) => s.isNotEmpty)
-        .map((s) => s[0].toUpperCase() + s.substring(1))
-        .join(' ');
-  }
+  String _displayName(WidgetRef ref) =>
+      displayNameFromEmail(ref.read(supabaseServiceProvider).currentUser?.email);
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
