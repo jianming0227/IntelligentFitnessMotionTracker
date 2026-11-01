@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/utils/friendly_error.dart';
 import '../providers/auth_providers.dart';
 import '../widgets/auth_scaffold.dart';
 
@@ -119,7 +120,7 @@ class _RegisterViewState extends ConsumerState<RegisterView> {
         primaryLabel: 'Sign up',
         loading: authState.isLoading,
         onPrimary: _handleRegister,
-        error: authState.hasError ? authState.error.toString() : null,
+        error: authState.hasError ? friendlyError(authState.error!) : null,
       ),
     );
   }
