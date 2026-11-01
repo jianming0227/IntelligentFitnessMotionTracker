@@ -11,6 +11,7 @@ import '../../../services/supabase_service.dart';
 import '../../plan/controllers/plan_controller.dart';
 import '../../profile/models/user_profile_biometrics.dart';
 import '../../profile/providers/profile_providers.dart';
+import '../../progress/providers/progress_providers.dart';
 import '../../train/models/set_metrics.dart';
 
 // Passed via GoRouter extra when navigating to /session/summary.
@@ -106,6 +107,8 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
     } catch (e, st) {
       AppLog.error('Supabase', 'Session save failed', e, st);
     }
+    // Home + Progress re-read history so the new session shows up.
+    ref.invalidate(sessionHistoryProvider);
 
     if (mounted) context.go('/plan');
   }

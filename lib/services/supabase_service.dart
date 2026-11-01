@@ -92,6 +92,30 @@ class SupabaseService {
     return rows.first;
   }
 
+  /// Signed-in user's sessions from the last [days] days, oldest first.
+  /// Null when there is no user or the request fails (caller falls back to
+  /// local history).
+  Future<List<Map<String, dynamic>>?> fetchWorkoutSessions({
+    int days = 90,
+  }) async {
+    final userId = currentUser?.id;
+    if (userId == null) return null;
+    try {
+      final since = DateTime.now().subtract(Duration(days: days));
+      final rows = await _client
+          .from('workout_sessions')
+          .select()
+          .eq('user_id', userId)
+          .gte('created_at', since.toIso8601String())
+          .order('created_at');
+      AppLog.ok('Supabase', 'Loaded ${rows.length} sessions');
+      return rows;
+    } catch (e) {
+      AppLog.warn('Supabase', 'Session history fetch failed: $e');
+      return null;
+    }
+  }
+
   Future<void> insertWorkoutSession({
     required String exerciseName,
     required int setsCompleted,

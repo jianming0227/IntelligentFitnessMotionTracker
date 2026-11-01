@@ -1,3 +1,5 @@
+import 'muscle.dart';
+
 enum ExerciseCategory { legs, upper, core }
 
 /// Per-exercise biomechanical parameters used by the form gauge **and** the
@@ -19,6 +21,12 @@ enum ExerciseCategory { legs, upper, core }
 ///     an ML Kit likelihood lower than this.
 ///   • [restBetweenSetsSec] — countdown shown after the coaching sheet
 ///     dismisses, before the next set begins rep counting again.
+///
+/// Analytics fields (Progress tab):
+///   • [met] — metabolic equivalent for the calorie estimate
+///     (kcal = MET × weight kg × active hours).
+///   • [primaryMuscles] / [secondaryMuscles] — drive the body map; secondary
+///     muscles count at half weight.
 class Exercise {
   const Exercise({
     required this.id,
@@ -31,6 +39,9 @@ class Exercise {
     required this.repBottomAngleStrict,
     required this.repTopAngleStrict,
     required this.romFullSpanDeg,
+    required this.met,
+    required this.primaryMuscles,
+    this.secondaryMuscles = const [],
     this.minRepDurationMs = 700,
     this.minLandmarkConfidence = 0.55,
     this.restBetweenSetsSec = 30,
@@ -58,6 +69,19 @@ class Exercise {
   final double minLandmarkConfidence;
   final int restBetweenSetsSec;
 
+  final double met;
+  final List<Muscle> primaryMuscles;
+  final List<Muscle> secondaryMuscles;
+
+  /// Looks up a catalog entry by display name (what Supabase stores in
+  /// `workout_sessions.exercise_type`). Null for unknown or renamed exercises.
+  static Exercise? byName(String name) {
+    for (final e in all) {
+      if (e.name.toLowerCase() == name.toLowerCase()) return e;
+    }
+    return null;
+  }
+
   String get categoryLabel => switch (category) {
     ExerciseCategory.legs => 'Legs',
     ExerciseCategory.upper => 'Upper',
@@ -81,6 +105,10 @@ class Exercise {
       repTopAngleStrict: 168, // must return above this to count "up"
       romFullSpanDeg: 105, // 175° standing → 70° deep
       minRepDurationMs: 800,
+      // Compendium of Physical Activities: resistance training, moderate.
+      met: 3.5,
+      primaryMuscles: [Muscle.quads, Muscle.glutes],
+      secondaryMuscles: [Muscle.hamstrings, Muscle.calves, Muscle.core],
     ),
     Exercise(
       id: 'bicep_curl',
@@ -96,6 +124,10 @@ class Exercise {
       repTopAngleStrict: 40, // arm must curl past this
       romFullSpanDeg: 140, // 170° extended → 30° curled
       minRepDurationMs: 600,
+      // Compendium of Physical Activities: resistance training, moderate.
+      met: 3.5,
+      primaryMuscles: [Muscle.biceps],
+      secondaryMuscles: [Muscle.forearms],
     ),
   ];
 }
