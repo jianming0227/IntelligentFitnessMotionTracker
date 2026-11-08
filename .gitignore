@@ -64,3 +64,6 @@ CLAUDE.md
 
 # Local launch helper with this machine's phone IP.
 run.ps1
+# Local demo-account reset helper (uses a personal Supabase access token).
+seed.ps1
+supabase/.temp/
