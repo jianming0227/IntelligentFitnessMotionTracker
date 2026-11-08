@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/providers/demo_mode_provider.dart';
+import '../../../core/utils/friendly_error.dart';
 import '../providers/auth_providers.dart';
 import '../widgets/auth_scaffold.dart';
 
@@ -119,7 +120,7 @@ class _LoginViewState extends ConsumerState<LoginView> {
         primaryLabel: 'Login',
         loading: authState.isLoading,
         onPrimary: _handleLogin,
-        error: authState.hasError ? authState.error.toString() : null,
+        error: authState.hasError ? friendlyError(authState.error!) : null,
         demoOnTap: () async {
           await seedDemoData();
           ref.read(demoModeProvider.notifier).state = true;

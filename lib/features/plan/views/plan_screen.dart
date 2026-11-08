@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/utils/friendly_error.dart';
 import '../../profile/models/user_profile_biometrics.dart';
 import '../../profile/providers/profile_providers.dart';
 import '../controllers/plan_controller.dart';
@@ -157,7 +158,7 @@ class _ErrorView extends StatelessWidget {
             Text('Could not generate plan', style: tt.titleMedium),
             const SizedBox(height: 8),
             Text(
-              error.toString(),
+              friendlyError(error),
               style: tt.bodyMedium,
               textAlign: TextAlign.center,
             ),

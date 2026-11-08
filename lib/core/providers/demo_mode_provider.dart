@@ -62,4 +62,43 @@ Future<void> seedDemoData() async {
 
   await prefs.setString('${uid}_adaptive_plan_json', planJson);
   await prefs.setString('${uid}_last_plan_exercise', 'Squat');
+
+  // Session history: same shape and story as supabase/seed_demo.sql (squat
+  // form improving, curl form lagging), dated relative to today so the
+  // streak and weekly chart are always populated.
+  await prefs.setStringList('${uid}_session_history', demoHistory(DateTime.now()));
+}
+
+/// Last 10 demo sessions in the local `session_history` format, oldest first.
+List<String> demoHistory(DateTime now) {
+  const daysAgo = [13, 12, 10, 9, 7, 5, 4, 2, 1, 0];
+  final today = DateTime(now.year, now.month, now.day);
+  return [
+    for (final (i, d) in daysAgo.indexed)
+      _demoEntry(
+        date: today.subtract(Duration(days: d)).add(const Duration(hours: 8)),
+        isSquat: i.isEven,
+        progress: (13 - d) / 13,
+      ),
+  ];
+}
+
+String _demoEntry({
+  required DateTime date,
+  required bool isSquat,
+  required double progress,
+}) {
+  final sets = [
+    for (var s = 1; s <= 3; s++)
+      () {
+        final reps = 8 + (progress * 3).round() - (s - 1);
+        final form = (isSquat ? 0.64 + 0.22 * progress : 0.56 + 0.10 * progress) -
+            0.03 * (s - 1);
+        final fatigue = ['Low', 'Moderate', 'Moderate'][s - 1];
+        return 'Set $s: $reps reps, form ${(form * 100).round()}%, '
+            'fatigue $fatigue';
+      }(),
+  ];
+  final name = isSquat ? 'Squat' : 'Bicep Curl';
+  return '${date.toIso8601String()}|$name — ${sets.join(' | ')}';
 }

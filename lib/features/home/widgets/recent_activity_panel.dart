@@ -1,135 +1,49 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// FR-4.2: Recent activity dashboard — parses the `session_history` strings
-/// written by SessionSummaryView and shows: last sessions list, a 7-day rep
-/// bar chart, and a day streak counter.
+import '../../progress/logic/streak.dart';
+import '../../progress/models/session_record.dart';
+import '../../progress/providers/progress_providers.dart';
+
+/// FR-4.2: Recent activity dashboard: last sessions list, a 7-day rep bar
+/// chart, and a day streak counter. Data comes from [sessionHistoryProvider]
+/// (Supabase when signed in, local history otherwise).
 ///
-/// History entry format (new entries): `<ISO date>|<Exercise> — Set 1: ...`
-/// Legacy entries have no date prefix — they still appear in the sessions
-/// list but are excluded from the chart and streak (no timestamp).
-class RecentActivityPanel extends StatefulWidget {
+/// Legacy local entries have no date. They still appear in the sessions list
+/// but are excluded from the chart and streak.
+class RecentActivityPanel extends ConsumerWidget {
   const RecentActivityPanel({super.key});
 
   @override
-  State<RecentActivityPanel> createState() => _RecentActivityPanelState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final records = ref.watch(sessionHistoryProvider).value;
+    if (records == null) return const SizedBox.shrink();
+    if (records.isEmpty) return const _EmptyActivityCard();
 
-class _RecentActivityPanelState extends State<RecentActivityPanel> {
-  late final Future<List<_SessionRecord>> _records = _load();
-
-  Future<List<_SessionRecord>> _load() async {
-    final prefs = await SharedPreferences.getInstance();
-    // UID-prefixed — matches SessionSummaryView and PlanController.
-    final uid = Supabase.instance.client.auth.currentUser?.id ?? 'demo';
-    final raw = prefs.getStringList('${uid}_session_history') ?? [];
-    return raw.map(_parse).toList();
-  }
-
-  _SessionRecord _parse(String entry) {
-    DateTime? date;
-    var body = entry;
-    final pipe = entry.indexOf('|');
-    if (pipe > 0) {
-      // Legacy entries also contain '|' between set summaries, but the text
-      // before it never parses as a date — tryParse keeps them safe.
-      date = DateTime.tryParse(entry.substring(0, pipe));
-      if (date != null) body = entry.substring(pipe + 1);
-    }
-
-    final dash = body.indexOf(' — ');
-    final exercise = dash > 0 ? body.substring(0, dash) : 'Workout';
-
-    final totalReps = RegExp(r'(\d+) reps')
-        .allMatches(body)
-        .map((m) => int.parse(m.group(1)!))
-        .fold(0, (a, b) => a + b);
-
-    final forms = RegExp(r'form (\d+)%')
-        .allMatches(body)
-        .map((m) => int.parse(m.group(1)!))
-        .toList();
-    final avgForm = forms.isEmpty
-        ? 0
-        : (forms.reduce((a, b) => a + b) / forms.length).round();
-
-    return _SessionRecord(
-      date: date,
-      exercise: exercise,
-      totalReps: totalReps,
-      avgFormPct: avgForm,
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<List<_SessionRecord>>(
-      future: _records,
-      builder: (context, snapshot) {
-        final records = snapshot.data ?? [];
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const SizedBox.shrink();
-        }
-        if (records.isEmpty) return const _EmptyActivityCard();
-
-        final dated = records.where((r) => r.date != null).toList();
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    final dated = records.where((r) => r.date != null).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Recent Activity',
-                    style: Theme.of(context).textTheme.titleLarge),
-                if (dated.isNotEmpty) _StreakChip(streak: _streak(dated)),
-              ],
-            ),
-            const SizedBox(height: 12),
-            if (dated.isNotEmpty) ...[
-              _WeeklyRepChart(records: dated),
-              const SizedBox(height: 12),
-            ],
-            ...records.reversed.take(3).map((r) => _SessionTile(record: r)),
+            Text('Recent Activity',
+                style: Theme.of(context).textTheme.titleLarge),
+            if (dated.isNotEmpty)
+              _StreakChip(
+                streak: currentStreak(dated.map((r) => r.date!), DateTime.now()),
+              ),
           ],
-        );
-      },
+        ),
+        const SizedBox(height: 12),
+        if (dated.isNotEmpty) ...[
+          _WeeklyRepChart(records: dated),
+          const SizedBox(height: 12),
+        ],
+        ...records.reversed.take(3).map((r) => _SessionTile(record: r)),
+      ],
     );
   }
-
-  /// Consecutive days with at least one session, counting back from today
-  /// (or yesterday, so an unfinished today doesn't break the streak).
-  int _streak(List<_SessionRecord> dated) {
-    final days = dated
-        .map((r) =>
-            DateTime(r.date!.year, r.date!.month, r.date!.day))
-        .toSet();
-    final now = DateTime.now();
-    var cursor = DateTime(now.year, now.month, now.day);
-    if (!days.contains(cursor)) {
-      cursor = cursor.subtract(const Duration(days: 1));
-    }
-    var streak = 0;
-    while (days.contains(cursor)) {
-      streak++;
-      cursor = cursor.subtract(const Duration(days: 1));
-    }
-    return streak;
-  }
-}
-
-class _SessionRecord {
-  const _SessionRecord({
-    required this.date,
-    required this.exercise,
-    required this.totalReps,
-    required this.avgFormPct,
-  });
-
-  final DateTime? date;
-  final String exercise;
-  final int totalReps;
-  final int avgFormPct;
 }
 
 class _StreakChip extends StatelessWidget {
@@ -167,7 +81,7 @@ class _StreakChip extends StatelessWidget {
 /// needed; each bar is a Container scaled against the busiest day.
 class _WeeklyRepChart extends StatelessWidget {
   const _WeeklyRepChart({required this.records});
-  final List<_SessionRecord> records;
+  final List<SessionRecord> records;
 
   @override
   Widget build(BuildContext context) {
@@ -269,7 +183,7 @@ class _WeeklyRepChart extends StatelessWidget {
 
 class _SessionTile extends StatelessWidget {
   const _SessionTile({required this.record});
-  final _SessionRecord record;
+  final SessionRecord record;
 
   @override
   Widget build(BuildContext context) {
@@ -298,7 +212,7 @@ class _SessionTile extends StatelessWidget {
               borderRadius: BorderRadius.circular(14),
             ),
             child: Icon(
-              record.exercise.toLowerCase().contains('squat')
+              record.exerciseName.toLowerCase().contains('squat')
                   ? Icons.fitness_center_rounded
                   : Icons.sports_gymnastics_rounded,
               color: cs.primary,
@@ -310,7 +224,7 @@ class _SessionTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(record.exercise, style: tt.titleMedium),
+                Text(record.exerciseName, style: tt.titleMedium),
                 const SizedBox(height: 2),
                 Text(
                   '$dateLabel${record.totalReps} reps  ·  ${record.avgFormPct}% form',
