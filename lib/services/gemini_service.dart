@@ -1,38 +1,25 @@
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../features/profile/models/user_profile_biometrics.dart';
 import '../features/train/models/set_metrics.dart';
 
 /// FR-3.1 / FR-3.2: Central Gemini wrapper.
 ///
-/// Two model instances are used:
-///   _textModel — prose output (post-set coaching tips).
-///   _jsonModel — strict JSON output (adaptive plan generation, enforced via
-///                GenerationConfig(responseMimeType: 'application/json')).
+/// Prompts are built here, but Gemini is called by the `gemini` Supabase Edge
+/// Function (supabase/functions/gemini), which holds the API key and picks the
+/// model. The app only sends the prompt with the signed-in user's token.
+///   json: false — prose output (post-set coaching tips).
+///   json: true  — strict JSON output (adaptive plan generation).
+///
+/// The function returns the whole answer at once, so each stream yields a
+/// single chunk. Callers keep their stream-based code unchanged.
 class GeminiService {
-  GeminiService()
-    : _textModel = GenerativeModel(
-        model: 'gemini-3.1-flash-lite',
-        apiKey: dotenv.env['GEMINI_API_KEY']!,
-      ),
-      _jsonModel = GenerativeModel(
-        model: 'gemini-3.1-flash-lite',
-        apiKey: dotenv.env['GEMINI_API_KEY']!,
-        generationConfig: GenerationConfig(
-          responseMimeType: 'application/json',
-        ),
-      );
-
-  final GenerativeModel _textModel;
-  final GenerativeModel _jsonModel;
-
   // FR-3.1: Streams a brief prose coaching tip after each set.
   Stream<String> streamSetCoaching({
     required String exerciseName,
     required SetMetrics metrics,
-  }) => _stream(_textModel, _buildSetPrompt(exerciseName, metrics));
+  }) => _generate(_buildSetPrompt(exerciseName, metrics), json: false);
 
   /// FR-3.2: Streams a JSON adaptive plan based on session metrics + biometrics.
   /// [currentLocalTime] anchors all generated `date` / `time` fields so the
@@ -44,8 +31,7 @@ class GeminiService {
     required List<String> previousSessionSummaries,
     required UserProfileBiometrics biometrics,
     required DateTime currentLocalTime,
-  }) => _stream(
-    _jsonModel,
+  }) => _generate(
     _buildSessionPrompt(
       exerciseName,
       sets,
@@ -53,14 +39,24 @@ class GeminiService {
       biometrics,
       currentLocalTime,
     ),
+    json: true,
   );
 
-  Stream<String> _stream(GenerativeModel model, String prompt) async* {
-    final responses = model.generateContentStream([Content.text(prompt)]);
-    await for (final chunk in responses) {
-      final text = chunk.text;
-      if (text != null && text.isNotEmpty) yield text;
+  Stream<String> _generate(String prompt, {required bool json}) async* {
+    final client = Supabase.instance.client;
+    // The function rejects the anon key, so skip the round trip in demo mode.
+    if (client.auth.currentSession == null) {
+      throw StateError('AI needs a signed-in user');
     }
+    final res = await client.functions.invoke(
+      'gemini',
+      body: {'prompt': prompt, 'json': json},
+    );
+    final text = (res.data as Map<String, dynamic>?)?['text'] as String?;
+    if (text == null || text.isEmpty) {
+      throw const FormatException('Empty response from AI');
+    }
+    yield text;
   }
 
   String _buildSetPrompt(String exerciseName, SetMetrics m) =>
