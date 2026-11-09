@@ -10,6 +10,8 @@ import '../../../core/utils/app_log.dart';
 import '../../../services/gemini_service.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../profile/models/user_profile_biometrics.dart';
+import '../../progress/models/session_record.dart';
+import '../../progress/providers/progress_providers.dart';
 import '../../train/models/set_metrics.dart';
 
 // FR-3.2: Manages the adaptive plan lifecycle.
@@ -26,15 +28,24 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
 
   @override
   Future<Map<String, dynamic>?> build() async {
+    // Re-read on sign-in / sign-out so each account sees its own plan.
+    ref.watch(authStateStreamProvider);
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_keyPlan);
-    if (raw == null) return null;
-    try {
-      return jsonDecode(raw) as Map<String, dynamic>;
-    } catch (e) {
-      AppLog.warn('Plan', 'Saved plan unreadable, starting empty: $e');
-      return null;
+    if (raw != null) {
+      try {
+        return jsonDecode(raw) as Map<String, dynamic>;
+      } catch (e) {
+        AppLog.warn('Plan', 'Saved plan unreadable, starting empty: $e');
+      }
     }
+
+    // Local cache empty (sign-out clears it, new device): use the cloud copy.
+    final remote = await ref.read(supabaseServiceProvider).fetchPlan();
+    if (remote != null) {
+      await prefs.setString(_keyPlan, jsonEncode(remote));
+    }
+    return remote;
   }
 
   Future<void> generateAdaptivePlan({
@@ -150,15 +161,35 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
   //3. Refresh Button is trigger and call generate plan, saved the history and exercise name
   Future<void> refreshPlan({required UserProfileBiometrics biometrics}) async {
     final prefs = await SharedPreferences.getInstance();
-    final history = prefs.getStringList(_keyHistory) ?? [];
-    final exerciseName = prefs.getString(_keyLastExercise) ?? 'Squat';
+    var history = prefs.getStringList(_keyHistory) ?? [];
+    var exerciseName = prefs.getString(_keyLastExercise);
+
+    // Local history is wiped on sign-out; fall back to the Supabase sessions
+    // so a fresh login (e.g. the demo account) still gets a grounded plan.
+    if (history.isEmpty) {
+      final records = await ref.read(sessionHistoryProvider.future);
+      final recent = records.length > 10
+          ? records.sublist(records.length - 10)
+          : records;
+      history = [for (final r in recent) _summarise(r)];
+      exerciseName ??= recent.isEmpty ? null : recent.last.exerciseName;
+    }
 
     await generateAdaptivePlan(
-      exerciseName: exerciseName,
+      exerciseName: exerciseName ?? 'Squat',
       sets: const [],
       biometrics: biometrics,
       sessionHistory: history,
     );
+  }
+
+  /// Same shape as the local history lines SessionSummaryView writes.
+  String _summarise(SessionRecord r) {
+    final sets = [
+      for (final (i, s) in r.sets.indexed)
+        'Set ${i + 1}: ${s.reps} reps, form ${(s.formScore * 100).round()}%',
+    ].join(' | ');
+    return '${r.exerciseName} — $sets';
   }
 
   Future<void> clearPlan() async {

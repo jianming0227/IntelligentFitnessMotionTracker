@@ -13,6 +13,7 @@ import '../features/home/views/home_view.dart';
 import '../features/plan/views/plan_screen.dart';
 import '../features/profile/views/biometric_survey_view.dart';
 import '../features/profile/views/profile_view.dart';
+import '../features/progress/views/progress_view.dart';
 import '../features/session/views/session_summary_view.dart';
 import '../features/shell/views/app_shell.dart';
 import '../features/train/models/exercise.dart';
@@ -65,6 +66,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         routes: [
           GoRoute(path: '/home', builder: (_, _) => const HomeView()),
           GoRoute(path: '/train', builder: (_, _) => const TrainView()),
+          GoRoute(path: '/progress', builder: (_, _) => const ProgressView()),
           GoRoute(path: '/plan', builder: (_, _) => const PlanScreen()),
           GoRoute(path: '/profile', builder: (_, _) => const ProfileView()),
         ],

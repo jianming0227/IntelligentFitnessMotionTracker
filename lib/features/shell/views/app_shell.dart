@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 /// App-wide chrome: the screen `child` plus the floating bottom navigation
-/// bar with five slots — Home, Train, [center launcher], Plan, Profile.
+/// bar with five slots — Home, Progress, [center launcher], Plan, Profile.
 ///
 /// The center slot is an enlarged accent-coloured circle that emphasises the
 /// "Start workout" entry point. Tapping it sends the user to the Train
-/// (courses list) screen so they can pick a session.
+/// (exercise catalog) screen so they can pick a session.
 class AppShell extends StatelessWidget {
   const AppShell({super.key, required this.child});
 
@@ -14,7 +14,7 @@ class AppShell extends StatelessWidget {
 
   static const _sideTabs = <_NavTab>[
     _NavTab(path: '/home', icon: Icons.home_rounded),
-    _NavTab(path: '/train', icon: Icons.fitness_center_rounded),
+    _NavTab(path: '/progress', icon: Icons.insights_rounded),
     // center slot is rendered separately
     _NavTab(path: '/plan', icon: Icons.calendar_month_rounded),
     _NavTab(path: '/profile', icon: Icons.person_rounded),
@@ -24,7 +24,7 @@ class AppShell extends StatelessWidget {
     for (var i = 0; i < _sideTabs.length; i++) {
       if (location.startsWith(_sideTabs[i].path)) return i;
     }
-    return 0;
+    return -1; // /train belongs to the center launcher, no side tab lit
   }
 
   @override

@@ -74,6 +74,26 @@ class SupabaseService {
     );
   }
 
+  /// Signed-in user's saved plan JSON. Null when there is no user, no plan,
+  /// or the request fails (caller keeps the empty state).
+  Future<Map<String, dynamic>?> fetchPlan() async {
+    final userId = currentUser?.id;
+    if (userId == null) return null;
+    try {
+      final rows = await _client
+          .from('plans')
+          .select('plan_json')
+          .eq('user_id', userId)
+          .limit(1);
+      if (rows.isEmpty) return null;
+      AppLog.ok('Supabase', 'Loaded saved plan');
+      return rows.first['plan_json'] as Map<String, dynamic>?;
+    } catch (e) {
+      AppLog.warn('Supabase', 'Plan fetch failed: $e');
+      return null;
+    }
+  }
+
   Future<void> deletePlan() async {
     final userId = currentUser?.id;
     if (userId == null) return;
