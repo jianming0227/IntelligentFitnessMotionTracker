@@ -53,7 +53,7 @@ class PlanScreen extends ConsumerWidget {
                     _ErrorView(error: err, onRetry: () => _refresh(ref)),
                 data: (json) => json == null || json.isEmpty   
                 /// 7. Receive the decoded json and pass to parser to call buildDynamicWidget
-                    ? const _EmptyView()
+                    ? _EmptyView(onGenerate: () => _refresh(ref))
                     : buildDynamicWidget(
                         json,
                         context,
@@ -176,7 +176,8 @@ class _ErrorView extends StatelessWidget {
 }
 
 class _EmptyView extends StatelessWidget {
-  const _EmptyView();
+  const _EmptyView({required this.onGenerate});
+  final VoidCallback onGenerate;
 
   @override
   Widget build(BuildContext context) {
@@ -206,9 +207,15 @@ class _EmptyView extends StatelessWidget {
             Text('No active adaptive routine', style: tt.titleMedium),
             const SizedBox(height: 10),
             Text(
-              'Head to the Train tab to log your first exercise session and activate your personalized AI coaching engine.',
+              'Generate a plan from your workout history, or tap the play button to log a session first.',
               style: tt.bodyMedium,
               textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.auto_awesome, size: 20),
+              label: const Text('Generate plan'),
+              onPressed: onGenerate,
             ),
           ],
         ),
