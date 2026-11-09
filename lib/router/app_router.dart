@@ -20,6 +20,7 @@ import '../features/train/models/exercise.dart';
 import '../features/train/views/camera_view.dart';
 import '../features/train/views/exercise_detail_view.dart';
 import '../features/train/views/train_view.dart';
+import '../features/train/views/tutorial_fullscreen_view.dart';
 
 // Wraps a Dart Stream into a ChangeNotifier so GoRouter can re-run redirect
 // every time auth state changes (sign in, sign out, token refresh).
@@ -80,6 +81,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/train/detail',
         builder: (context, state) =>
             ExerciseDetailView(exercise: state.extra as Exercise),
+      ),
+      GoRoute(
+        path: '/train/tutorial',
+        builder: (context, state) =>
+            TutorialFullscreenView(exercise: state.extra as Exercise),
       ),
       GoRoute(
         path: '/train/camera',

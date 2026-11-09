@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/exercise_images.dart';
+import '../data/exercise_tutorials.dart';
 import '../models/exercise.dart';
+import '../widgets/tutorial_model_hero.dart';
 
 /// Workout detail page — shown when the user taps a course in [TrainView] or
 /// a card in the home carousel. Hero photo on top, a rounded info panel
@@ -17,6 +19,8 @@ class ExerciseDetailView extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final imagePath = exerciseImageFor(exercise.id);
+    final tutorial = tutorialFor(exercise.id);
+    final photo = _HeroImage(imagePath: imagePath, emoji: exercise.emoji);
 
     return Scaffold(
       backgroundColor: cs.surface,
@@ -27,10 +31,17 @@ class ExerciseDetailView extends StatelessWidget {
             child: Column(
               children: [
                 Expanded(
-                  child: _HeroImage(
-                    imagePath: imagePath,
-                    emoji: exercise.emoji,
-                  ),
+                  // Animated 3D demo when one exists, photo otherwise.
+                  child: tutorial == null
+                      ? photo
+                      : TutorialModelHero(
+                          tutorial: tutorial,
+                          fallback: photo,
+                          onTap: () => context.push(
+                            '/train/tutorial',
+                            extra: exercise,
+                          ),
+                        ),
                 ),
                 // Empty space at the bottom so the panel can sit on top.
                 Expanded(child: Container(color: cs.surface)),
@@ -55,6 +66,11 @@ class ExerciseDetailView extends StatelessWidget {
                       }
                     },
                   ),
+                  if (tutorial != null)
+                    _FormTipsPill(
+                      onTap: () =>
+                          context.push('/train/tutorial', extra: exercise),
+                    ),
                   _HeroIconButton(
                     icon: Icons.favorite_border_rounded,
                     onTap: () {},
@@ -101,6 +117,45 @@ class _HeroImage extends StatelessWidget {
         color: cs.surfaceContainerHighest,
         alignment: Alignment.center,
         child: Text(emoji, style: const TextStyle(fontSize: 120)),
+      ),
+    );
+  }
+}
+
+/// "3D demo" pill between the back and favourite buttons: opens the
+/// fullscreen rotatable model with timed cue captions (tapping the hero does
+/// too).
+class _FormTipsPill extends StatelessWidget {
+  const _FormTipsPill({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.35),
+      shape: const StadiumBorder(),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: onTap,
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.view_in_ar_rounded, size: 18, color: Colors.white),
+              SizedBox(width: 6),
+              Text(
+                '3D demo',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
