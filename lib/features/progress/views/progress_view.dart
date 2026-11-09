@@ -11,6 +11,7 @@ import '../models/session_record.dart';
 import '../providers/progress_providers.dart';
 import '../widgets/body_map.dart';
 import '../widgets/form_trend_chart.dart';
+import '../widgets/mascot_card.dart';
 
 /// FR-4.3: Progress tab — this week's totals, the muscle body map, form trend,
 /// personal records and a monthly per-exercise breakdown. Everything is
@@ -25,6 +26,12 @@ class ProgressView extends ConsumerWidget {
         (ref.watch(profileProvider).value ?? UserProfileBiometrics.defaults)
             .weightKg;
     final tt = Theme.of(context).textTheme;
+    // This week's KPIs sit beside Flick; null while loading or on error (tiles
+    // show dashes so the card never jumps).
+    final records = history.value;
+    final week = records == null
+        ? null
+        : weekStats(records, DateTime.now(), weightKg);
 
     return Scaffold(
       body: SafeArea(
@@ -36,6 +43,11 @@ class ProgressView extends ConsumerWidget {
             children: [
               Text('Progress', style: tt.titleLarge),
               const SizedBox(height: 16),
+              // Flick + this week's KPIs (2x2), shown in every state so a
+              // brand-new account still sees the mascot and zeroed tiles.
+              const _SectionLabel('This week'),
+              MascotCard(kpis: _KpiGrid(stats: week)),
+              const SizedBox(height: 20),
               ...history.when(
                 loading: () => const [
                   SizedBox(height: 120),
@@ -64,16 +76,12 @@ class ProgressView extends ConsumerWidget {
     double weightKg,
   ) {
     final now = DateTime.now();
-    final week = weekStats(records, now, weightKg);
     final muscles = muscleStatuses(records, now);
     final trend = formTrend(records);
     final prs = personalRecords(records);
     final breakdown = exerciseBreakdown(records, now);
 
     return [
-      const _SectionLabel('This week'),
-      _KpiRow(stats: week),
-      const SizedBox(height: 20),
       const _SectionLabel('Muscles · last 7 days'),
       _Card(
         child: Column(
@@ -189,46 +197,56 @@ class _Message extends StatelessWidget {
   }
 }
 
-class _KpiRow extends StatelessWidget {
-  const _KpiRow({required this.stats});
-  final WeekStats stats;
+/// This week's four KPIs as a 2x2 grid (lives inside [MascotCard]).
+class _KpiGrid extends StatelessWidget {
+  const _KpiGrid({required this.stats});
+
+  /// Null while history is loading or failed: every tile shows a dash.
+  final WeekStats? stats;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    final s = stats;
+    String dash(Object? v, [String suffix = '']) => v == null ? '–' : '$v$suffix';
+    return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        _Kpi(value: '${stats.sessions}', label: 'Sessions'),
-        const SizedBox(width: 8),
-        _Kpi(value: '${stats.reps}', label: 'Reps'),
-        const SizedBox(width: 8),
-        _Kpi(
-          value: stats.avgFormPct == null ? '–' : '${stats.avgFormPct}%',
-          label: 'Form',
+        Row(
+          children: [
+            _KpiTile(value: dash(s?.sessions), label: 'Sessions'),
+            const SizedBox(width: 8),
+            _KpiTile(value: dash(s?.reps), label: 'Reps'),
+          ],
         ),
-        const SizedBox(width: 8),
-        _Kpi(
-          value: stats.kcal == null ? '–' : '${stats.kcal!.round()}',
-          label: 'kcal',
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _KpiTile(value: dash(s?.avgFormPct, '%'), label: 'Form'),
+            const SizedBox(width: 8),
+            _KpiTile(value: dash(s?.kcal?.round()), label: 'kcal'),
+          ],
         ),
       ],
     );
   }
 }
 
-class _Kpi extends StatelessWidget {
-  const _Kpi({required this.value, required this.label});
+class _KpiTile extends StatelessWidget {
+  const _KpiTile({required this.value, required this.label});
   final String value;
   final String label;
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
         decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(18),
+          // A step up from the card so the tiles read as separate cells.
+          color: cs.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(16),
         ),
         child: Column(
           children: [

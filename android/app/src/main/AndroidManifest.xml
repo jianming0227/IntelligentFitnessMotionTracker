@@ -1,12 +1,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Camera hardware access -->
     <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- Supabase + the 3D viewer's local model server (debug builds add this
+         automatically; release builds need it declared). -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
 
     <application
         android:label="fitnessapp"
         android:name="${applicationName}"
-        android:icon="@mipmap/launcher_icon">
+        android:icon="@mipmap/launcher_icon"
+        android:networkSecurityConfig="@xml/network_security_config">
         <activity
             android:name=".MainActivity"
             android:exported="true"

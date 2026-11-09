@@ -1,0 +1,8 @@
+# Large downloads (MPFB add-on, MakeHuman asset pack, ~330 MB): re-downloadable, never commit
+blender/downloads/
+# Claude bridge runtime files
+blender/queue/
+blender/log/
+blender/__pycache__/
+# Blender autosave/backup files
+*.blend1
