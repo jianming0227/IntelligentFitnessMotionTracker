@@ -6,20 +6,31 @@ enum MascotMood { idle, happy, sleepy, sad }
 
 /// One day of the adaptive plan, parsed from a `SessionCard`. [label] is the
 /// card's exercise (e.g. "Squat", "Active Recovery").
-typedef PlanDay = ({DateTime date, bool isRest, String label});
+/// [done] = an own (non-tracked) workout the user ticked off by hand.
+typedef PlanDay = ({DateTime date, bool isRest, String label, bool done});
 
 const _months = {
-  'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
-  'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
+  'jan': 1,
+  'feb': 2,
+  'mar': 3,
+  'apr': 4,
+  'may': 5,
+  'jun': 6,
+  'jul': 7,
+  'aug': 8,
+  'sep': 9,
+  'oct': 10,
+  'nov': 11,
+  'dec': 12,
 };
 
 /// Plan cards carry dates like `"Wed, Jun 3"` with no year. Picks the year
 /// that puts the date nearest to [now], so a plan made on Dec 30 for
 /// "Thu, Jan 1" resolves to next year.
 DateTime? parsePlanDate(String raw, DateTime now) {
-  final m = RegExp(r'([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2})').firstMatch(
-    raw.contains(',') ? raw.substring(raw.indexOf(',') + 1) : raw,
-  );
+  final m = RegExp(
+    r'([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2})',
+  ).firstMatch(raw.contains(',') ? raw.substring(raw.indexOf(',') + 1) : raw);
   if (m == null) return null;
   final month = _months[m.group(1)!.toLowerCase()];
   final day = int.tryParse(m.group(2)!);
@@ -37,8 +48,26 @@ DateTime? parsePlanDate(String raw, DateTime now) {
   return best;
 }
 
-/// Reads the `sessions` list of a plan JSON. A card is a rest day when any of
-/// its text mentions "Active Recovery" or "Rest", or it has no start action.
+/// One plan card is a rest day when the user skipped it, or (for AI cards)
+/// its day/exercise name says "Active Recovery" or "Rest", or it has no start
+/// action. The coach tip and volume are not checked: "rest 60 s between
+/// sets" is still a workout. A user's own exercise (`custom`) has no start
+/// action but is still a workout.
+bool isRestSession(Map<dynamic, dynamic> s) {
+  if (s['skipped'] == true) return true;
+  if (s['custom'] == true) return false;
+  final name = [
+    s['day'],
+    s['exercise'],
+  ].whereType<String>().join(' ').toLowerCase();
+  final action = s['actionId'];
+  return name.contains('active recovery') ||
+      RegExp(r'\brest\b').hasMatch(name) ||
+      action is! String ||
+      !action.startsWith('start_');
+}
+
+/// Reads the `sessions` list of a plan JSON (see [isRestSession]).
 List<PlanDay> planDays(Map<String, dynamic>? plan, DateTime now) {
   final sessions = plan?['sessions'];
   if (sessions is! List) return const [];
@@ -46,25 +75,34 @@ List<PlanDay> planDays(Map<String, dynamic>? plan, DateTime now) {
   for (final s in sessions.whereType<Map>()) {
     final date = s['date'] is String ? parsePlanDate(s['date'], now) : null;
     if (date == null) continue;
-    final text = [s['day'], s['exercise'], s['volume'], s['intensity']]
-        .whereType<String>()
-        .join(' ')
-        .toLowerCase();
-    final action = s['actionId'];
-    final isRest = text.contains('active recovery') ||
-        RegExp(r'\brest\b').hasMatch(text) ||
-        action is! String ||
-        !action.startsWith('start_');
-    final label = s['exercise'] is String && (s['exercise'] as String).trim().isNotEmpty
+    final isRest = isRestSession(s);
+    final label =
+        s['exercise'] is String && (s['exercise'] as String).trim().isNotEmpty
         ? (s['exercise'] as String).trim()
         : (isRest ? 'Active Recovery' : 'Workout');
-    days.add((date: date, isRest: isRest, label: label));
+    days.add((
+      date: date,
+      isRest: isRest,
+      label: label,
+      done: s['done'] == true && !isRest,
+    ));
   }
   days.sort((a, b) => a.date.compareTo(b.date));
   return days;
 }
 
 DateTime _day(DateTime d) => DateTime(d.year, d.month, d.day);
+
+/// Days trained: real sessions plus own workouts ticked off on the plan.
+Set<DateTime> _trainedDays(
+  Iterable<DateTime> sessionDates,
+  Map<String, dynamic>? plan,
+  DateTime now,
+) => {
+  ...sessionDates.map(_day),
+  for (final d in planDays(plan, now))
+    if (d.done) d.date,
+};
 
 /// Picks the mascot mood. Never guilt-trips for long: sad only lasts until
 /// the user trains again.
@@ -82,7 +120,7 @@ MascotMood mascotMoodFor({
   required Iterable<DateTime> sessionDates,
   required DateTime now,
 }) {
-  final trained = sessionDates.map(_day).toSet();
+  final trained = _trainedDays(sessionDates, plan, now);
   final today = _day(now);
   if (trained.contains(today)) return MascotMood.happy;
 
@@ -116,7 +154,7 @@ String? celebrationKey({
   ({int value, DateTime? date})? mostRepsRecord,
   ({int value, DateTime? date})? bestFormRecord,
 }) {
-  final trained = sessionDates.map(_day).toSet();
+  final trained = _trainedDays(sessionDates, plan, now);
   final today = _day(now);
   String ymd(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-'
@@ -126,7 +164,10 @@ String? celebrationKey({
   if (training.isNotEmpty && training.every((d) => trained.contains(d.date))) {
     return 'plan:${ymd(training.first.date)}-${ymd(training.last.date)}';
   }
-  for (final (kind, r) in [('reps', mostRepsRecord), ('form', bestFormRecord)]) {
+  for (final (kind, r) in [
+    ('reps', mostRepsRecord),
+    ('form', bestFormRecord),
+  ]) {
     final d = r?.date;
     if (r != null && d != null && _day(d) == today) {
       return 'pr:$kind:${r.value}:${ymd(today)}';
@@ -136,22 +177,24 @@ String? celebrationKey({
 }
 
 /// One-line speech bubble for the mascot card. Encouraging, never guilt.
-String mascotLine(MascotMood mood, {required int streak, required bool hasPlan}) =>
-    switch (mood) {
-      MascotMood.happy when streak >= 2 =>
-        '$streak-day streak! Keep the fire going.',
-      MascotMood.happy => 'Nice work! That one counts.',
-      MascotMood.sleepy => 'Rest day. Recovery is training too.',
-      MascotMood.sad => 'Missed one? A quick set gets us back on track.',
-      MascotMood.idle when !hasPlan =>
-        'Finish a workout and I\'ll help plan your week.',
-      MascotMood.idle => 'Ready when you are. Today\'s session awaits!',
-    };
+String mascotLine(
+  MascotMood mood, {
+  required int streak,
+  required bool hasPlan,
+}) => switch (mood) {
+  MascotMood.happy when streak >= 2 =>
+    '$streak-day streak! Keep the fire going.',
+  MascotMood.happy => 'Nice work! That one counts.',
+  MascotMood.sleepy => 'Rest day. Recovery is training too.',
+  MascotMood.sad => 'Missed one? A quick set gets us back on track.',
+  MascotMood.idle when !hasPlan =>
+    'Finish a workout and I\'ll help plan your week.',
+  MascotMood.idle => 'Ready when you are. Today\'s session awaits!',
+};
 
 /// Re-export so callers computing [mascotLine] need one import.
 int mascotStreak(Iterable<DateTime> sessionDates, DateTime now) =>
     currentStreak(sessionDates, now);
-
 
 // ── Explaining Flick to the user ─────────────────────────────────────────────
 
@@ -187,7 +230,20 @@ class MascotStatus {
 
 String shortDate(DateTime d) {
   const wd = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const mo = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
   return '${wd[d.weekday - 1]}, ${mo[d.month - 1]} ${d.day}';
 }
 
@@ -200,7 +256,7 @@ MascotStatus mascotStatusFor({
   required DateTime now,
 }) {
   final mood = mascotMoodFor(plan: plan, sessionDates: sessionDates, now: now);
-  final trained = sessionDates.map(_day).toSet();
+  final trained = _trainedDays(sessionDates, plan, now);
   final today = _day(now);
   final trainedToday = trained.contains(today);
   final days = planDays(plan, now);
@@ -208,7 +264,9 @@ MascotStatus mascotStatusFor({
 
   bool trainedSince(DateTime d) => trained.any((t) => t.isAfter(d));
   final missed = days
-      .where((d) => !d.isRest && d.date.isBefore(today) && !trained.contains(d.date))
+      .where(
+        (d) => !d.isRest && d.date.isBefore(today) && !trained.contains(d.date),
+      )
       .toList();
   final lastMissed = missed.isEmpty ? null : missed.last;
 
@@ -219,8 +277,12 @@ MascotStatus mascotStatusFor({
           : 'Do one workout today',
       trainedToday
           ? ChecklistState.done
-          : (todayEntry != null && todayEntry.isRest ? ChecklistState.rest : ChecklistState.todo),
-      detail: trainedToday ? 'Done. Flick is happy!' : 'Any exercise counts. Flick cheers up right away.',
+          : (todayEntry != null && todayEntry.isRest
+                ? ChecklistState.rest
+                : ChecklistState.todo),
+      detail: trainedToday
+          ? 'Done. Flick is happy!'
+          : 'Any exercise counts. Flick cheers up right away.',
     ),
     if (days.isEmpty)
       const ChecklistItem(
@@ -234,29 +296,49 @@ MascotStatus mascotStatusFor({
         d.isRest
             ? ChecklistState.rest
             : trained.contains(d.date)
-                ? ChecklistState.done
-                : d.date.isBefore(today)
-                    ? ChecklistState.missed
-                    : d.date == today
-                        ? ChecklistState.todo
-                        : ChecklistState.upcoming,
+            ? ChecklistState.done
+            : d.date.isBefore(today)
+            ? ChecklistState.missed
+            : d.date == today
+            ? ChecklistState.todo
+            : ChecklistState.upcoming,
       ),
   ];
 
   final (headline, reason) = switch (mood) {
-    MascotMood.happy when trainedToday => ('Flick is happy', 'You trained today. Keep the streak going!'),
+    MascotMood.happy when trainedToday => (
+      'Flick is happy',
+      'You trained today. Keep the streak going!',
+    ),
     MascotMood.happy => ('Flick is happy', "You're on track with your plan."),
-    MascotMood.sleepy => ('Flick is resting', "It's a planned rest day. Recovery is training too."),
+    MascotMood.sleepy => (
+      'Flick is resting',
+      "It's a planned rest day. Recovery is training too.",
+    ),
     MascotMood.sad => (
-        'Flick is a little sad',
-        lastMissed != null && !trainedSince(lastMissed.date)
-            ? 'You missed ${shortDate(lastMissed.date)} (${lastMissed.label}). One workout cheers him up.'
-            : 'You missed a plan day. One workout cheers him up.',
-      ),
-    MascotMood.idle when days.isEmpty => ('Flick is waiting', "No plan yet. Finish a workout and he'll help plan your week."),
-    MascotMood.idle when todayEntry != null => ('Flick is waiting', "Today's ${todayEntry.label} session is still to do."),
-    MascotMood.idle => ('Flick is waiting', 'Your plan starts ${shortDate(days.first.date)}.'),
+      'Flick is a little sad',
+      lastMissed != null && !trainedSince(lastMissed.date)
+          ? 'You missed ${shortDate(lastMissed.date)} (${lastMissed.label}). One workout cheers him up.'
+          : 'You missed a plan day. One workout cheers him up.',
+    ),
+    MascotMood.idle when days.isEmpty => (
+      'Flick is waiting',
+      "No plan yet. Finish a workout and he'll help plan your week.",
+    ),
+    MascotMood.idle when todayEntry != null => (
+      'Flick is waiting',
+      "Today's ${todayEntry.label} session is still to do.",
+    ),
+    MascotMood.idle => (
+      'Flick is waiting',
+      'Your plan starts ${shortDate(days.first.date)}.',
+    ),
   };
 
-  return MascotStatus(mood: mood, headline: headline, reason: reason, checklist: checklist);
+  return MascotStatus(
+    mood: mood,
+    headline: headline,
+    reason: reason,
+    checklist: checklist,
+  );
 }

@@ -13,6 +13,7 @@ import '../../profile/models/user_profile_biometrics.dart';
 import '../../progress/models/session_record.dart';
 import '../../progress/providers/progress_providers.dart';
 import '../../train/models/set_metrics.dart';
+import '../logic/plan_edits.dart';
 
 // FR-3.2: Manages the adaptive plan lifecycle.
 // All SharedPreferences keys are prefixed with the Supabase user ID (or
@@ -57,6 +58,8 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
   }) async {
     // Preserve the current plan so a transient failure can never blank-wipe it.
     final previous = state.valueOrNull;
+    // B7: the user's own changes to the last plan, so Gemini doesn't undo them.
+    final userEdits = describeUserEdits(previous);
     state = const AsyncValue.loading();
 
     // A truncated stream (flaky network) surfaces as a FormatException on decode
@@ -78,6 +81,7 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
           sets: sets,
           biometrics: biometrics,
           sessionHistory: sessionHistory,
+          userEdits: userEdits,
         );
 
         // The parsed Map is re-encoded canonically, then saved to local + supa.
@@ -137,6 +141,7 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
     required List<SetMetrics> sets,
     required UserProfileBiometrics biometrics,
     required List<String> sessionHistory,
+    required List<String> userEdits,
   }) async {
     final buffer = StringBuffer();
     await for (final chunk // Call gemini provider
@@ -146,6 +151,7 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
               exerciseName: exerciseName,
               sets: sets,
               previousSessionSummaries: sessionHistory,
+              userEdits: userEdits,
               biometrics: biometrics,
               currentLocalTime: DateTime.now(),
             )) {
@@ -203,6 +209,24 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
         'Set ${i + 1}: ${s.reps} reps, form ${(s.formScore * 100).round()}%',
     ].join(' | ');
     return '${r.exerciseName} — $sets';
+  }
+
+  /// Saves a plan the user edited by hand (local first, Supabase best-effort).
+  Future<void> saveEditedPlan(Map<String, dynamic> plan) async {
+    state = AsyncValue.data(plan);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyPlan, jsonEncode(plan));
+    try {
+      await ref
+          .read(supabaseServiceProvider)
+          .upsertPlan(
+            planJson: plan,
+            exerciseName: prefs.getString(_keyLastExercise) ?? 'Squat',
+          );
+    } catch (e) {
+      AppLog.warn('Plan', 'Supabase upsert of edited plan skipped: $e');
+    }
+    AppLog.ok('Plan', 'Edited plan saved');
   }
 
   Future<void> clearPlan() async {

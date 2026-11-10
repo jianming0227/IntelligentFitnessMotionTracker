@@ -52,6 +52,17 @@ List<Map<String, dynamic>> planCardsOn(
   ];
 }
 
+/// Date → is it a rest day, for the calendar. When a date has a rest card
+/// and a workout card (e.g. a skipped workout plus one the user added), the
+/// workout wins.
+Map<DateTime, bool> plannedRestByDay(List<PlanDay> days) {
+  final out = <DateTime, bool>{};
+  for (final d in days) {
+    out[d.date] = (out[d.date] ?? true) && d.isRest;
+  }
+  return out;
+}
+
 /// First [count] sentences of [text]. Older plans have 3-sentence coach notes;
 /// Flick's bubble only shows two.
 String firstSentences(String text, {int count = 2}) {

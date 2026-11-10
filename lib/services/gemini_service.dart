@@ -31,6 +31,7 @@ class GeminiService {
     required List<String> previousSessionSummaries,
     required UserProfileBiometrics biometrics,
     required DateTime currentLocalTime,
+    List<String> userEdits = const [],
   }) => _generate(
     _buildSessionPrompt(
       exerciseName,
@@ -38,6 +39,7 @@ class GeminiService {
       previousSessionSummaries,
       biometrics,
       currentLocalTime,
+      userEdits,
     ),
     json: true,
   );
@@ -79,7 +81,11 @@ Give 2–3 sentences of specific, motivating feedback. Note one thing they did w
     List<String> history,
     UserProfileBiometrics bio,
     DateTime now,
+    List<String> userEdits,
   ) {
+    final editsSection = userEdits.isEmpty
+        ? '  None.'
+        : userEdits.map((e) => '  • $e').join('\n');
     final setLines = sets
         .map(
           (s) =>
@@ -138,6 +144,10 @@ $setLines
 --- TRAINING HISTORY (oldest → newest) ---
 $historySection
 
+--- USER'S OWN CHANGES TO THE LAST PLAN ---
+$editsSection
+Treat these as the user's preferences. Do not raise volume above what the user set unless form and fatigue clearly allow it, and keep a skipped exercise lighter. Exercises the user added that are not in the catalog below cannot be camera-tracked: never put them in the plan, but count them as extra training load.
+
 --- PROGRESSION DECISION RULES ---
 Evaluate the fatigue trend across all sets, then apply exactly one rule:
 • MAINTENANCE — if any set has 'High' fatigue: prescribe the same volume as today. Insert a rest day as Day 2 — label it "Active Recovery" with light stretching advice.
@@ -164,13 +174,13 @@ Only assign exercises from this list. The actionId must match exactly:
 
 --- OUTPUT FORMAT ---
 Return a single raw JSON object. No markdown, no code fences, no commentary outside the JSON.
-All string values must be derived from the user's actual data. The title must reflect their goal. The coachNote must reference their real form score, fatigue label, and the specific progression decision you made. The `date` and `time` fields are mandatory on every SessionCard and must be computed from the CURRENT LOCAL TIME anchor above.
+All string values must be derived from the user's actual data. The title must reflect their goal. The coachNote is one plain sentence explaining why the plan looks this way, using their real form score or fatigue and the progression decision you made. The `date` and `time` fields are mandatory on every SessionCard and must be computed from the CURRENT LOCAL TIME anchor above.
 
 JSON schema (replace every angle-bracket field with computed content):
 {
   "type": "WorkoutPlanView",
   "title": "<concise motivating title tailored to their specific goal and level>",
-  "coachNote": "<exactly 2 short sentences, max 35 words total, spoken by a friendly coach: 1) cite the actual form score and fatigue trend, 2) state whether you applied maintenance or progressive overload>",
+  "coachNote": "<exactly 1 short, simple sentence, max 20 words, saying why this plan: the key number and the decision, e.g. 'Form held at 84% with low fatigue, so reps go up by one.'>",
   "sessions": [
     {
       "type": "SessionCard",
