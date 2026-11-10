@@ -42,6 +42,7 @@ void main() {
         _s('Squat', daysAgo(2), [(10, 0.8)], durationMs: 60000),
       ], now, 60);
       expect(w.kcal, closeTo(7.0, 1e-9));
+      expect(w.activeTime, const Duration(minutes: 2));
     });
 
     test('empty week', () {

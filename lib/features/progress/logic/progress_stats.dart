@@ -8,9 +8,13 @@ class WeekStats {
     required this.reps,
     this.avgFormPct,
     this.kcal,
+    this.activeTime = Duration.zero,
   });
 
   final int sessions;
+
+  /// Sum of recorded set durations. Zero when none were recorded.
+  final Duration activeTime;
   final int reps;
 
   /// Null when there were no sets this week.
@@ -36,6 +40,7 @@ WeekStats weekStats(
         : (sets.fold(0.0, (sum, s) => sum + s.formScore) / sets.length * 100)
               .round(),
     kcal: kcals.isEmpty ? null : kcals.reduce((a, b) => a + b),
+    activeTime: week.fold(Duration.zero, (sum, r) => sum + r.activeDuration),
   );
 }
 

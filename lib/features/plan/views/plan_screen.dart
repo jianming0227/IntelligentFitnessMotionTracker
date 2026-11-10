@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/utils/friendly_error.dart';
 import '../../profile/models/user_profile_biometrics.dart';
 import '../../profile/providers/profile_providers.dart';
+import '../../progress/logic/mascot_mood.dart';
+import '../../progress/providers/progress_providers.dart';
 import '../controllers/plan_controller.dart';
 import '../widgets/dynamic_ui_parser.dart';
 
@@ -19,6 +21,11 @@ class PlanScreen extends ConsumerWidget {
     final isLoading = planAsync.isLoading;
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
+    // Calendar rings, month stats and Flick's mood come from session history.
+    final records = ref.watch(sessionHistoryProvider).value ?? const [];
+    final weightKg =
+        (ref.watch(profileProvider).value ?? UserProfileBiometrics.defaults)
+            .weightKg;
 
     return Scaffold(
       body: SafeArea(
@@ -31,17 +38,41 @@ class PlanScreen extends ConsumerWidget {
                 children: [
                   Text('Schedule', style: tt.titleLarge),
                   const Spacer(),
-                  if (planAsync.value != null && !isLoading)
-                    IconButton(
-                      icon: Icon(
-                        Icons.delete_outline_rounded,
-                        color: cs.error,
-                        size: 22,
-                      ),
-                      tooltip: 'Delete plan',
-                      onPressed: () => _confirmDelete(context, ref),
+                  if (planAsync.value != null) ...[
+                    // Refresh lives here so it stays visible while the
+                    // calendar scrolls.
+                    SizedBox(
+                      width: 40,
+                      height: 40,
+                      child: isLoading
+                          ? Padding(
+                              padding: const EdgeInsets.all(10),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: cs.primary,
+                              ),
+                            )
+                          : IconButton(
+                              icon: Icon(
+                                Icons.refresh_rounded,
+                                color: cs.primary,
+                                size: 22,
+                              ),
+                              tooltip: 'Refresh plan',
+                              onPressed: () => _refresh(ref),
+                            ),
                     ),
-                  Icon(Icons.auto_awesome, color: cs.primary, size: 20),
+                    if (!isLoading)
+                      IconButton(
+                        icon: Icon(
+                          Icons.delete_outline_rounded,
+                          color: cs.error,
+                          size: 22,
+                        ),
+                        tooltip: 'Delete plan',
+                        onPressed: () => _confirmDelete(context, ref),
+                      ),
+                  ],
                 ],
               ),
             ),
@@ -57,8 +88,13 @@ class PlanScreen extends ConsumerWidget {
                     : buildDynamicWidget(
                         json,
                         context,
-                        onRefresh: isLoading ? null : () => _refresh(ref),
-                        isLoading: isLoading,
+                        records: records,
+                        weightKg: weightKg,
+                        mood: mascotMoodFor(
+                          plan: json,
+                          sessionDates: records.map((r) => r.date).nonNulls,
+                          now: DateTime.now(),
+                        ),
                       ),
               ),
             ),

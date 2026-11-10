@@ -16,7 +16,6 @@ import '../models/rep_state_machine.dart';
 import '../models/set_metrics.dart';
 import '../models/side_selector.dart';
 import '../widgets/coaching_sheet.dart';
-import '../widgets/endurance_bar.dart';
 import '../widgets/form_gauge.dart';
 import '../widgets/pose_painter.dart';
 
@@ -63,15 +62,9 @@ class _CameraViewState extends State<CameraView> {
 
   // FR-2.4: TUT — time the joint spent in the form-gauge green zone.
   DateTime? _tutZoneEnteredAt;
+  // Not shown live (E3): it goes into SetMetrics and the post-set coaching
+  // sheet shows endurance, ROM and TUT.
   int _tutMs = 0;
-
-  // FR-2.4: live Endurance Bar input — fraction of the set so far spent in the
-  // target zone. Uses the set ticker's elapsed time as the denominator.
-  double get _liveTutRatio {
-    final elapsedMs = _setElapsed.inMilliseconds;
-    if (elapsedMs <= 0) return 0.0;
-    return (_tutMs / elapsedMs).clamp(0.0, 1.0);
-  }
 
   // ── Session lifecycle ───────────────────────────────────────────────────────
   bool _sessionPaused =
@@ -841,20 +834,6 @@ class _CameraViewState extends State<CameraView> {
                       angle: _currentAngle,
                       minAngle: widget.exercise.targetAngleMin,
                       maxAngle: widget.exercise.targetAngleMax,
-                      visible: _showGauge,
-                      onTap: () => setState(() => _showGauge = !_showGauge),
-                    ),
-                  ),
-                  // FR-2.4: composite endurance readout. Shares the gauge's
-                  // visibility tap so one tap dims the whole metrics block.
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 40,
-                      vertical: 4,
-                    ),
-                    child: EnduranceBar(
-                      romScore: _repMachine.romScore,
-                      tutRatio: _liveTutRatio,
                       visible: _showGauge,
                       onTap: () => setState(() => _showGauge = !_showGauge),
                     ),

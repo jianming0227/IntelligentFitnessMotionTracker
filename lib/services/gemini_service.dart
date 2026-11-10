@@ -170,7 +170,7 @@ JSON schema (replace every angle-bracket field with computed content):
 {
   "type": "WorkoutPlanView",
   "title": "<concise motivating title tailored to their specific goal and level>",
-  "coachNote": "<2–3 sentences: cite actual form score and fatigue trend, then state whether you applied maintenance or progressive overload and why>",
+  "coachNote": "<exactly 2 short sentences, max 35 words total, spoken by a friendly coach: 1) cite the actual form score and fatigue trend, 2) state whether you applied maintenance or progressive overload>",
   "sessions": [
     {
       "type": "SessionCard",
