@@ -118,7 +118,17 @@ class _CoachingSheetState extends ConsumerState<CoachingSheet> {
               _MetricChip(label: 'Fatigue', value: widget.metrics.fatigueLabel),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 10),
+          // E3: endurance is only shown after the set, never live.
+          Text(
+            'Endurance ${widget.metrics.endurancePercent} '
+            '(${widget.metrics.enduranceLabel})  ·  '
+            'ROM ${widget.metrics.romPercent}  ·  '
+            'TUT ${widget.metrics.tutLabel}',
+            textAlign: TextAlign.center,
+            style: AppTextStyles.caption,
+          ),
+          const SizedBox(height: 16),
 
           // Streaming coaching text
           Container(
