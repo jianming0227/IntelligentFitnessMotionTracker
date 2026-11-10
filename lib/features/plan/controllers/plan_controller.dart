@@ -20,8 +20,7 @@ import '../../train/models/set_metrics.dart';
 class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
   static const _outputFileName = 'fitform_plan.json';
 
-  String get _uid =>
-      Supabase.instance.client.auth.currentUser?.id ?? 'demo';
+  String get _uid => Supabase.instance.client.auth.currentUser?.id ?? 'demo';
   String get _keyPlan => '${_uid}_adaptive_plan_json';
   String get _keyLastExercise => '${_uid}_last_plan_exercise';
   String get _keyHistory => '${_uid}_session_history';
@@ -48,7 +47,9 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
     return remote;
   }
 
-  Future<void> generateAdaptivePlan({
+  /// Returns true when a new plan was saved, false when every attempt failed
+  /// (the previous plan, if any, stays on screen).
+  Future<bool> generateAdaptivePlan({
     required String exerciseName,
     required List<SetMetrics> sets,
     required UserProfileBiometrics biometrics,
@@ -66,8 +67,11 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
 
     //4.  Retry for two time to call Stream function and write to storage
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
-      AppLog.info('Plan', 'Generating plan for $exerciseName '
-          '(attempt $attempt/$maxAttempts)');
+      AppLog.info(
+        'Plan',
+        'Generating plan for $exerciseName '
+            '(attempt $attempt/$maxAttempts)',
+      );
       try {
         final parsed = await _streamAndParsePlan(
           exerciseName: exerciseName,
@@ -91,19 +95,24 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
         } catch (e) {
           AppLog.warn('Plan', 'Supabase upsert skipped: $e');
         }
+
         /// 6. Change the state and ref.read will change the ui
         state = AsyncValue.data(parsed);
         AppLog.ok('Plan', 'Plan generated and saved');
-        return;
+        return true;
       } catch (e, st) {
         lastError = e;
         lastStack = st;
         AppLog.error('Plan', 'Attempt $attempt/$maxAttempts failed', e);
       }
     }
-    AppLog.error('Plan', 'All attempts failed: '
-        '${previous != null ? 'keeping previous plan' : 'no plan to show'}',
-        lastError, lastStack);
+    AppLog.error(
+      'Plan',
+      'All attempts failed: '
+          '${previous != null ? 'keeping previous plan' : 'no plan to show'}',
+      lastError,
+      lastStack,
+    );
 
     // All attempts failed. Never blank-wipe a working plan: if one already
     // exists, keep it on screen. Only surface an error when there is nothing
@@ -117,11 +126,12 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
         lastStack ?? StackTrace.current,
       );
     }
+    return false;
   }
 
   /// 5. Streams the Gemini plan, accumulates all chunks, then decodes into map. Throws a
   /// [FormatException] if the stream was empty or the JSON is incomplete.
-  
+
   Future<Map<String, dynamic>> _streamAndParsePlan({
     required String exerciseName,
     required List<SetMetrics> sets,
@@ -130,7 +140,9 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
   }) async {
     final buffer = StringBuffer();
     await for (final chunk // Call gemini provider
-        in ref.read(geminiServiceProvider).streamSessionAnalysis(
+        in ref
+            .read(geminiServiceProvider)
+            .streamSessionAnalysis(
               exerciseName: exerciseName,
               sets: sets,
               previousSessionSummaries: sessionHistory,
@@ -158,6 +170,7 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
     }
     return error ?? Exception('Could not generate plan. Tap Retry.');
   }
+
   //3. Refresh Button is trigger and call generate plan, saved the history and exercise name
   Future<void> refreshPlan({required UserProfileBiometrics biometrics}) async {
     final prefs = await SharedPreferences.getInstance();
@@ -220,4 +233,5 @@ class PlanController extends AsyncNotifier<Map<String, dynamic>?> {
 
 final planProvider =
     AsyncNotifierProvider<PlanController, Map<String, dynamic>?>(
-        PlanController.new);
+      PlanController.new,
+    );
