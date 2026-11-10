@@ -128,26 +128,32 @@ begin
   end loop;
 
   -- 4. Ready-made plan so the Plan tab isn't empty --------------------------
+  -- Dates use the same format Gemini writes ("Wed, Nov 11") and are filled in
+  -- from v_today, so the plan always sits on the next few days.
   insert into public.plans (user_id, plan_json, exercise_name, created_at)
-  values (v_uid, $json${
+  values (v_uid, replace(replace(replace($json${
     "type": "WorkoutPlanView",
     "title": "Muscle Building: Progressive Overload Block",
     "coachNote": "Squat form is up to the low 80s. Curl form is still in the 60s, so this block slows the curl down and adds one squat rep.",
     "sessions": [
-      {"type": "SessionCard", "day": "Day 1", "date": "Mon", "time": "08:00 AM",
+      {"type": "SessionCard", "day": "Day 1", "date": "{{D1}}", "time": "08:00 AM",
        "exercise": "Squat", "volume": "3 sets x 11 reps",
        "intensity": "Keep knee angle below 95 degrees at the bottom.",
        "actionId": "start_squat"},
-      {"type": "SessionCard", "day": "Day 2", "date": "Wed", "time": "08:00 AM",
+      {"type": "SessionCard", "day": "Day 2", "date": "{{D2}}", "time": "08:00 AM",
        "exercise": "Bicep Curl", "volume": "3 sets x 10 reps",
        "intensity": "Slow 3-second lowering, full extension every rep.",
        "actionId": "start_bicep_curl"},
-      {"type": "SessionCard", "day": "Day 3", "date": "Fri", "time": "08:00 AM",
+      {"type": "SessionCard", "day": "Day 3", "date": "{{D3}}", "time": "08:00 AM",
        "exercise": "Squat", "volume": "4 sets x 10 reps",
        "intensity": "Add a fourth set. Depth and knee tracking over speed.",
        "actionId": "start_squat"}
     ]
-  }$json$::jsonb, 'Squat', now())
+  }$json$,
+    '{{D1}}', to_char(v_today + interval '1 day', 'Dy, Mon FMDD')),
+    '{{D2}}', to_char(v_today + interval '3 days', 'Dy, Mon FMDD')),
+    '{{D3}}', to_char(v_today + interval '5 days', 'Dy, Mon FMDD'))::jsonb,
+    'Squat', now())
   on conflict (user_id) do update set
     plan_json = excluded.plan_json,
     exercise_name = excluded.exercise_name,
