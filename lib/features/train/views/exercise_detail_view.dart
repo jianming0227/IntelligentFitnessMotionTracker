@@ -109,11 +109,10 @@ class _HeroImage extends StatelessWidget {
       ),
     );
     if (imagePath == null) return fallback;
-    return Image.asset(
+    return exerciseImage(
       imagePath!,
-      fit: BoxFit.cover,
       alignment: const Alignment(0, -0.1),
-      errorBuilder: (_, _, _) => fallback,
+      fallback: (_) => fallback,
     );
   }
 }

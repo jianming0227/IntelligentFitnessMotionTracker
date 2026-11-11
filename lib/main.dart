@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
 import 'core/utils/app_log.dart';
+import 'features/train/data/exercise_catalog.dart';
 
 Future<void> main() async {
   final widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
@@ -28,10 +29,13 @@ Future<void> main() async {
     anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
   );
 
+  // Exercise catalog from the `exercises` table (cache / bundled copy when
+  // offline), loaded while the splash screen is still up.
+  await ExerciseCatalog.init();
+
   final user = Supabase.instance.client.auth.currentUser;
   AppLog.ok('App', 'Started (${user != null ? 'signed in' : 'signed out'})');
 
   FlutterNativeSplash.remove();
   runApp(const ProviderScope(child: FitnessApp()));
 }
-

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 
+import '../data/exercise_images.dart';
 import '../data/exercise_tutorials.dart';
 import '../data/model_viewer_bridge.dart';
 
@@ -65,11 +66,10 @@ class _TutorialModelHeroState extends State<TutorialModelHero> {
   Widget build(BuildContext context) {
     final still = MediaQuery.of(context).disableAnimations;
     final t = widget.tutorial;
-    final poster = Image.asset(
+    final poster = exerciseImage(
       t.poster,
-      fit: BoxFit.cover,
       alignment: const Alignment(0, -0.3),
-      errorBuilder: (_, _, _) => widget.fallback,
+      fallback: (_) => widget.fallback,
     );
 
     return Semantics(
@@ -116,8 +116,9 @@ class _TutorialModelHeroState extends State<TutorialModelHero> {
                         loading: Loading.eager,
                         debugLogging: false,
                         relatedJs: modelViewerBridgeJs,
-                        javascriptChannels:
-                            modelViewerChannels(onLoaded: _hidePoster),
+                        javascriptChannels: modelViewerChannels(
+                          onLoaded: _hidePoster,
+                        ),
                       ),
                     ),
                     if (!_posterGone)

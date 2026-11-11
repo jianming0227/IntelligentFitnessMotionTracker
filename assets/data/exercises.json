@@ -1,0 +1,83 @@
+[
+  {
+    "id": "squat",
+    "name": "Squat",
+    "category": "legs",
+    "description": "Full body lower compound",
+    "sort_order": 10,
+    "is_active": true,
+    "joints": ["hip", "knee", "ankle"],
+    "angle_at_bottom": "small",
+    "target_angle_min": 70,
+    "target_angle_max": 100,
+    "rep_bottom_angle": 95,
+    "rep_top_angle": 168,
+    "rom_full_span_deg": 105,
+    "min_rep_ms": 800,
+    "min_landmark_confidence": 0.55,
+    "rest_seconds": 30,
+    "form_cues": ["Go deeper", "Keep your chest up", "Knees track over toes"],
+    "met": 3.5,
+    "primary_muscles": ["quads", "glutes"],
+    "secondary_muscles": ["hamstrings", "calves", "core"],
+    "image_url": "assets/images/squat.png",
+    "image_framing": {"alignX": 0, "alignY": 0.35, "zoom": 1.4, "zoomX": -1, "zoomY": 0.5},
+    "tutorial": {
+      "model": "assets/models/squat.glb",
+      "poster": "assets/tutorials/squat_poster.png",
+      "animation": "Squat",
+      "loopSeconds": 5.8,
+      "heroOrbit": "-60deg 80deg 4.6m",
+      "heroTarget": "0m 0.85m 0m",
+      "heroFieldOfView": "30deg",
+      "fullOrbit": "-60deg 80deg auto",
+      "fullTarget": "auto auto auto",
+      "cues": [
+        {"at": 0.2, "text": "Target muscles: quads and glutes"},
+        {"at": 1.4, "text": "Hips back, knees track over toes"},
+        {"at": 3.9, "text": "Chest up, drive up through your heels"}
+      ]
+    }
+  },
+  {
+    "id": "bicep_curl",
+    "name": "Bicep Curl",
+    "category": "upper",
+    "description": "Elbow flexion, full ROM",
+    "sort_order": 20,
+    "is_active": true,
+    "joints": ["shoulder", "elbow", "wrist"],
+    "angle_at_bottom": "large",
+    "target_angle_min": 30,
+    "target_angle_max": 100,
+    "rep_bottom_angle": 162,
+    "rep_top_angle": 40,
+    "rom_full_span_deg": 140,
+    "min_rep_ms": 600,
+    "min_landmark_confidence": 0.55,
+    "rest_seconds": 30,
+    "form_cues": ["Full extension at the bottom", "Squeeze at the top", "Keep your elbow still"],
+    "met": 3.5,
+    "primary_muscles": ["biceps"],
+    "secondary_muscles": ["forearms"],
+    "image_url": "assets/images/bicep.png",
+    "image_framing": {"alignX": 0, "alignY": 0, "zoom": 1.4, "zoomX": -1.01, "zoomY": -0.5},
+    "tutorial": {
+      "model": "assets/models/bicep_curl.glb",
+      "poster": "assets/tutorials/bicep_curl_poster.png",
+      "animation": "BicepCurl",
+      "loopSeconds": 5.6,
+      "heroOrbit": "-30deg 80deg 2.9m",
+      "heroTarget": "0m 1.15m 0m",
+      "heroFieldOfView": "28deg",
+      "fullOrbit": "-30deg 80deg auto",
+      "fullTarget": "auto auto auto",
+      "cues": [
+        {"at": 0.2, "text": "Target muscle: biceps"},
+        {"at": 1.4, "text": "Elbows pinned to your sides"},
+        {"at": 3.0, "text": "Squeeze at the top"},
+        {"at": 3.7, "text": "Lower slowly to full extension"}
+      ]
+    }
+  }
+]

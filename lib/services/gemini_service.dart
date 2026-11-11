@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../features/profile/models/user_profile_biometrics.dart';
 import '../features/progress/logic/mascot_mood.dart';
+import '../features/train/models/exercise.dart';
 import '../features/train/models/set_metrics.dart';
 
 /// FR-3.1 / FR-3.2: Central Gemini wrapper.
@@ -116,6 +117,16 @@ Give 2–3 sentences of specific, motivating feedback. Note one thing they did w
 
     // Exact dates to plan, so the model never has to work out "tomorrow".
     final dateList = dates.map(shortDate).toList();
+    // Catalog from the exercises table: new rows reach the AI automatically.
+    final catalog = Exercise.all;
+    final actionIds = catalog.map((e) => "'start_${e.id}'").join(' or ');
+    final catalogLines = catalog
+        .map(
+          (e) =>
+              '• ${e.name} → actionId: "start_${e.id}" '
+              '(${e.categoryLabel}; works ${[...e.primaryMuscles, ...e.secondaryMuscles].map((m) => m.label).join(', ')})',
+        )
+        .join('\n');
     final cardSchema = [
       for (final d in dateList)
         '''
@@ -126,7 +137,7 @@ Give 2–3 sentences of specific, motivating feedback. Note one thing they did w
       "exercise": "<exercise name from catalog, or 'Active Recovery'>",
       "volume": "<computed sets × reps, e.g. '3 sets × 12 reps'>",
       "intensity": "<one short specific instruction>",
-      "actionId": "<exactly 'start_squat' or 'start_bicep_curl'>"
+      "actionId": "<exactly $actionIds>"
     }''',
     ].join(',\n');
 
@@ -179,9 +190,8 @@ TUT (Time Under Tension) guidance — apply to the intensity field:
 • If average TUT is above 4.0s: acknowledge the strong time under tension; apply full overload if fatigue permits.
 
 --- EXERCISE CATALOG ---
-Only assign exercises from this list. The actionId must match exactly:
-• Squat → actionId: "start_squat"
-• Bicep Curl → actionId: "start_bicep_curl"
+Only assign exercises from this list. The actionId must match exactly. Balance muscle groups across the days:
+$catalogLines
 
 --- OUTPUT FORMAT ---
 Return a single raw JSON object. No markdown, no code fences, no commentary outside the JSON.
