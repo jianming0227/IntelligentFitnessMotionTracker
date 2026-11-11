@@ -13,6 +13,11 @@ import '../../plan/controllers/plan_controller.dart';
 import '../../profile/models/user_profile_biometrics.dart';
 import '../../profile/providers/profile_providers.dart';
 import '../../progress/providers/progress_providers.dart';
+import '../../community/logic/community_format.dart';
+import '../../community/widgets/share_card.dart';
+import '../../community/widgets/share_sheet.dart';
+import '../../progress/logic/streak.dart';
+import '../../train/models/exercise.dart';
 import '../../train/models/set_metrics.dart';
 
 // Passed via GoRouter extra when navigating to /session/summary.
@@ -47,6 +52,9 @@ class SessionSummaryView extends ConsumerStatefulWidget {
 
 class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
   _PlanStatus _planStatus = _PlanStatus.generating;
+
+  /// Supabase id of this workout once saved; links a community post to it.
+  String? _workoutSessionId;
 
   // UID-prefixed so multiple accounts on one device stay isolated — must
   // match PlanController._keyHistory.
@@ -120,7 +128,7 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
     final planSessionId = widget.data.planSessionId;
     String? sessionId;
     try {
-      sessionId = await SupabaseService().insertWorkoutSession(
+      sessionId = _workoutSessionId = await SupabaseService().insertWorkoutSession(
         planSessionId: planSessionId,
         exerciseName: widget.data.exerciseName,
         setsCompleted: widget.data.sets.length,
@@ -157,6 +165,32 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
         );
     // Home + Progress re-read history so the new session shows up.
     container.invalidate(sessionHistoryProvider);
+  }
+
+  /// Share card / community post for this workout.
+  void _openShare() {
+    final now = DateTime.now();
+    final weightKg =
+        (ref.read(profileProvider).value ?? UserProfileBiometrics.defaults)
+            .weightKg;
+    final dates = [
+      ...?ref.read(sessionHistoryProvider).value?.map((r) => r.date).nonNulls,
+      now, // this workout, in case history hasn't reloaded yet
+    ];
+    showShareSheet(
+      context,
+      workoutSessionId: _workoutSessionId,
+      data: ShareCardData(
+        exerciseName: widget.data.exerciseName,
+        date: now,
+        streakDays: currentStreak(dates, now),
+        stats: statsFromSets(
+          widget.data.sets,
+          met: Exercise.byName(widget.data.exerciseName)?.met ?? 3.5,
+          weightKg: weightKg,
+        ),
+      ),
+    );
   }
 
   @override
@@ -196,6 +230,20 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
                   isBest: sets.length > 1 && i == _bestIndex(sets),
                 ),
                 const SizedBox(height: 10),
+              ],
+              if (sets.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  onPressed: _openShare,
+                  icon: const Icon(Icons.ios_share_rounded, size: 18),
+                  label: const Text('Share workout'),
+                ),
               ],
             ],
           ),
