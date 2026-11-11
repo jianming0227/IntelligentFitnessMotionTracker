@@ -395,11 +395,34 @@ class _CameraViewState extends State<CameraView> {
 
   // ── Joint angles + landmark confidence ──────────────────────────────────────
 
-  /// Returns the angle in degrees only if all three landmarks meet the
-  /// per-exercise confidence threshold. Low-confidence frames are dropped so
-  /// they can't toggle the rep state machine.
-  /// if bicep curl, else squat
+  /// Returns the angle in degrees of the working side, read from landmarks
+  /// that meet the per-exercise confidence threshold. Low-confidence frames
+  /// are dropped so they can't toggle the rep state machine.
   double? _jointAngle(Pose pose) {
+    final (left, right) = _sideAngles(pose);
+    // Pre-session the gate only needs one trackable side; the selector starts
+    // fresh in _beginSet.
+    if (!_sessionStarted) return left ?? right;
+
+    final wasLocked = _sideSelector.isLocked;
+    final side = _sideSelector.feed(left, right);
+    if (!wasLocked && _sideSelector.isLocked) {
+      AppLog.info(
+        'Side',
+        'Locked ${side.name.toUpperCase()} '
+            '(moved L ${_sideSelector.leftRange.round()}° / '
+            'R ${_sideSelector.rightRange.round()}°)',
+      );
+    }
+    final picked = side == BodySide.left ? left : right;
+    if (_sideSelector.isLocked) return picked;
+    // Not locked yet: if the leading side drops a frame, use the other one.
+    return picked ?? (side == BodySide.left ? right : left);
+  }
+
+  /// Joint angle of each side, null where that side is below the confidence
+  /// threshold. Squat: hip → knee → ankle. Bicep curl: shoulder → elbow → wrist.
+  (double?, double?) _sideAngles(Pose pose) {
     final isCurl = widget.exercise.id == 'bicep_curl';
     // Squat: hip → knee → ankle. Bicep curl: shoulder → elbow → wrist.
     final left = isCurl
@@ -425,29 +448,14 @@ class _CameraViewState extends State<CameraView> {
             PoseLandmarkType.rightAnkle,
           ];
 
-    final leftLms = [for (final t in left) pose.landmarks[t]];
-    final rightLms = [for (final t in right) pose.landmarks[t]];
-    final leftConf = _meanLikelihood(leftLms);
-    final rightConf = _meanLikelihood(rightLms);
-    final wasLocked = _sideSelector.isLocked;
-    final side = _sideSelector.feed(leftConf, rightConf);
-    if (!wasLocked && _sideSelector.isLocked) {
-      AppLog.info(
-        'Side',
-        'Locked ${side.name.toUpperCase()} '
-            '(last frame L ${leftConf.toStringAsFixed(2)} / '
-            'R ${rightConf.toStringAsFixed(2)})',
-      );
+    double? angleOf(List<PoseLandmarkType> types) {
+      final lms = [for (final t in types) pose.landmarks[t]];
+      if (!_landmarksConfident(lms)) return null;
+      return _angleAt(lms[0]!, lms[1]!, lms[2]!);
     }
-    final lms = side == BodySide.left ? leftLms : rightLms;
-    // Return null if the confidence was below threshold
-    if (!_landmarksConfident(lms)) return null;
-    return _angleAt(lms[0]!, lms[1]!, lms[2]!);
-  }
 
-  // Missing landmarks count as zero so a side ML Kit didn't return never wins.
-  double _meanLikelihood(List<PoseLandmark?> lms) =>
-      lms.fold(0.0, (sum, l) => sum + (l?.likelihood ?? 0.0)) / lms.length;
+    return (angleOf(left), angleOf(right));
+  }
 
   //The pure math logic of calculation of angle
   double _angleAt(PoseLandmark a, PoseLandmark b, PoseLandmark c) {

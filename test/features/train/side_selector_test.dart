@@ -9,59 +9,79 @@ void main() {
       expect(s.isLocked, isFalse);
     });
 
-    test('picks the more confident side before locking', () {
-      final s = SideSelector();
-      expect(s.feed(0.3, 0.9), BodySide.right);
-      expect(s.isLocked, isFalse);
-    });
-
-    test('locks after lockAfterSamples frames', () {
-      final s = SideSelector(lockAfterSamples: 10);
-      for (var i = 0; i < 9; i++) {
-        s.feed(0.4, 0.9);
+    test('right-arm curl locks RIGHT while the left arm rests', () {
+      final s = SideSelector(lockRangeDeg: 40);
+      // Left arm hangs at ~170°, right elbow curls from 170° down to 60°.
+      for (var a = 170.0; a >= 60; a -= 10) {
+        s.feed(170 + (a % 3), a);
       }
-      expect(s.isLocked, isFalse);
-      s.feed(0.4, 0.9);
       expect(s.isLocked, isTrue);
       expect(s.side, BodySide.right);
     });
 
-    test('locked side ignores later frames favouring the other side', () {
-      final s = SideSelector(lockAfterSamples: 3);
-      for (var i = 0; i < 3; i++) {
-        s.feed(0.9, 0.2);
+    test('left-arm curl locks LEFT', () {
+      final s = SideSelector(lockRangeDeg: 40);
+      for (var a = 170.0; a >= 60; a -= 10) {
+        s.feed(a, 168);
       }
+      expect(s.side, BodySide.left);
+      expect(s.isLocked, isTrue);
+    });
+
+    test('squat facing the camera locks once both knees bend', () {
+      final s = SideSelector(lockRangeDeg: 40);
+      for (var a = 175.0; a >= 90; a -= 5) {
+        s.feed(a, a + 2);
+      }
+      expect(s.isLocked, isTrue);
+    });
+
+    test('standing still with jitter does not lock', () {
+      final s = SideSelector(lockRangeDeg: 40);
+      for (var i = 0; i < 100; i++) {
+        s.feed(170 + (i % 5), 168 + (i % 7));
+      }
+      expect(s.isLocked, isFalse);
+    });
+
+    test('before locking, follows the side that has moved more', () {
+      final s = SideSelector(lockRangeDeg: 40);
+      s.feed(170, 170);
+      expect(s.feed(169, 150), BodySide.right);
+      expect(s.isLocked, isFalse);
+    });
+
+    test('low-confidence frames (null) are skipped for that side', () {
+      final s = SideSelector(lockRangeDeg: 40);
+      s.feed(170, null);
+      s.feed(null, 170);
+      s.feed(null, 120);
+      expect(s.leftRange, 0);
+      expect(s.rightRange, 50);
+      expect(s.side, BodySide.right);
+    });
+
+    test('locked side ignores later movement on the other side', () {
+      final s = SideSelector(lockRangeDeg: 40);
+      s.feed(170, 170);
+      s.feed(120, 170);
+      expect(s.side, BodySide.left);
       for (var i = 0; i < 20; i++) {
-        expect(s.feed(0.1, 0.99), BodySide.left);
+        expect(s.feed(170, 60.0 + i), BodySide.left);
       }
-    });
-
-    test('decides on the total, so one noisy frame does not flip it', () {
-      final s = SideSelector(lockAfterSamples: 4);
-      s.feed(0.8, 0.5);
-      s.feed(0.8, 0.5);
-      s.feed(0.1, 0.99); // single occlusion spike on the left
-      s.feed(0.8, 0.5);
-      expect(s.side, BodySide.left);
-    });
-
-    test('tie keeps left, matching the old hardcoded behaviour', () {
-      final s = SideSelector(lockAfterSamples: 2);
-      s.feed(0.7, 0.7);
-      s.feed(0.7, 0.7);
-      expect(s.side, BodySide.left);
     });
 
     test('reset unlocks so the next set can pick again', () {
-      final s = SideSelector(lockAfterSamples: 2);
-      s.feed(0.9, 0.1);
-      s.feed(0.9, 0.1);
+      final s = SideSelector(lockRangeDeg: 40);
+      s.feed(170, 170);
+      s.feed(120, 170);
       expect(s.side, BodySide.left);
 
       s.reset();
       expect(s.isLocked, isFalse);
-      s.feed(0.1, 0.9);
-      s.feed(0.1, 0.9);
+      expect(s.leftRange, 0);
+      s.feed(170, 170);
+      s.feed(170, 120);
       expect(s.side, BodySide.right);
     });
   });
