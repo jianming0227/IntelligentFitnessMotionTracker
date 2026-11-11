@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../features/profile/models/user_profile_biometrics.dart';
+import '../features/progress/logic/mascot_mood.dart';
 import '../features/train/models/set_metrics.dart';
 
 /// FR-3.1 / FR-3.2: Central Gemini wrapper.
@@ -22,8 +23,8 @@ class GeminiService {
   }) => _generate(_buildSetPrompt(exerciseName, metrics), json: false);
 
   /// FR-3.2: Streams a JSON adaptive plan based on session metrics + biometrics.
-  /// [currentLocalTime] anchors all generated `date` / `time` fields so the
-  /// schedule reads as "Wed, Jun 3" / "08:00 AM" relative to the user's clock.
+  /// The plan is rolling: Gemini plans only [datesToPlan] (one card each) and
+  /// sees [alreadyPlanned] so the new days fit around the existing ones.
   /// Caller accumulates all chunks then `jsonDecode`s the combined string.
   Stream<String> streamSessionAnalysis({
     required String exerciseName,
@@ -31,6 +32,8 @@ class GeminiService {
     required List<String> previousSessionSummaries,
     required UserProfileBiometrics biometrics,
     required DateTime currentLocalTime,
+    required List<DateTime> datesToPlan,
+    List<String> alreadyPlanned = const [],
     List<String> userEdits = const [],
   }) => _generate(
     _buildSessionPrompt(
@@ -39,6 +42,8 @@ class GeminiService {
       previousSessionSummaries,
       biometrics,
       currentLocalTime,
+      datesToPlan,
+      alreadyPlanned,
       userEdits,
     ),
     json: true,
@@ -81,17 +86,21 @@ Give 2–3 sentences of specific, motivating feedback. Note one thing they did w
     List<String> history,
     UserProfileBiometrics bio,
     DateTime now,
+    List<DateTime> dates,
+    List<String> alreadyPlanned,
     List<String> userEdits,
   ) {
     final editsSection = userEdits.isEmpty
         ? '  None.'
         : userEdits.map((e) => '  • $e').join('\n');
-    final setLines = sets
-        .map(
-          (s) =>
-              '  Set ${s.setNumber}: ${s.repsCompleted} reps | Form: ${s.formPercent} | Fatigue: ${s.fatigueLabel} | TUT: ${s.tutLabel} | ROM: ${s.romPercent} | Endurance: ${s.endurancePercent} (${s.enduranceLabel})',
-        )
-        .join('\n');
+    final setLines = sets.isEmpty
+        ? '  No workout today.'
+        : sets
+              .map(
+                (s) =>
+                    '  Set ${s.setNumber}: ${s.repsCompleted} reps | Form: ${s.formPercent} | Fatigue: ${s.fatigueLabel} | TUT: ${s.tutLabel} | ROM: ${s.romPercent} | Endurance: ${s.endurancePercent} (${s.enduranceLabel})',
+              )
+              .join('\n');
 
     final historySection = history.isEmpty
         ? '  No previous sessions — this is their first session.'
@@ -101,37 +110,39 @@ Give 2–3 sentences of specific, motivating feedback. Note one thing they did w
               .map((e) => '  Session ${e.key + 1}: ${e.value}')
               .join('\n');
 
-    // Compute three concrete dates so the model has unambiguous anchors and
-    // never has to guess what "tomorrow" means relative to a date string.
-    final day1 = now.add(const Duration(days: 1));
-    final day2 = now.add(const Duration(days: 2));
-    final day3 = now.add(const Duration(days: 3));
+    final plannedSection = alreadyPlanned.isEmpty
+        ? '  Nothing yet.'
+        : alreadyPlanned.map((e) => '  • $e').join('\n');
 
-    String fmt(DateTime d) {
-      const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-      const months = [
-        'Jan',
-        'Feb',
-        'Mar',
-        'Apr',
-        'May',
-        'Jun',
-        'Jul',
-        'Aug',
-        'Sep',
-        'Oct',
-        'Nov',
-        'Dec',
-      ];
-      return '${weekdays[d.weekday - 1]}, ${months[d.month - 1]} ${d.day}';
-    }
+    // Exact dates to plan, so the model never has to work out "tomorrow".
+    final dateList = dates.map(shortDate).toList();
+    final cardSchema = [
+      for (final d in dateList)
+        '''
+    {
+      "type": "SessionCard",
+      "date": "$d",
+      "time": "<HH:MM AM/PM, e.g. 08:00 AM>",
+      "exercise": "<exercise name from catalog, or 'Active Recovery'>",
+      "volume": "<computed sets × reps, e.g. '3 sets × 12 reps'>",
+      "intensity": "<one short specific instruction>",
+      "actionId": "<exactly 'start_squat' or 'start_bicep_curl'>"
+    }''',
+    ].join(',\n');
 
     return '''
-You are FitForm's Expert AI Strength & Conditioning Coach. Your task is to analyze the data below and produce a fully personalized 3-day training plan. Every field in your output must be computed from the actual data — never copy placeholder text or repeat the schema examples literally.
+You are FitForm's Expert AI Strength & Conditioning Coach. The user's plan is rolling: days that are already planned stay as they are, and you plan ONLY the dates listed below, one session card per date. Every field must be computed from the actual data — never copy placeholder text or repeat the schema examples literally.
 
 --- CURRENT LOCAL TIME ---
 ${now.toIso8601String()}
-Use this anchor for every scheduled session. Day 1 = ${fmt(day1)}, Day 2 = ${fmt(day2)}, Day 3 = ${fmt(day3)}. Time of day should be chosen sensibly (e.g. early morning if the user trained late the previous day, otherwise mirror today's training hour).
+
+--- DATES TO PLAN (exactly ${dateList.length}, one card each, in this order) ---
+${dateList.map((d) => '  • $d').join('\n')}
+Time of day should be chosen sensibly (mirror the user's usual training hour from the plan below, else 08:00 AM).
+
+--- ALREADY PLANNED (do not change; plan around these) ---
+$plannedSection
+Keep the week balanced: avoid the same exercise on more than two days in a row, and never repeat a planned rest day back to back.
 
 --- USER PROFILE ---
 Gender: ${bio.gender} | Age: ${bio.age}
@@ -144,14 +155,14 @@ $setLines
 --- TRAINING HISTORY (oldest → newest) ---
 $historySection
 
---- USER'S OWN CHANGES TO THE LAST PLAN ---
+--- USER'S OWN CHANGES TO THE PLAN ---
 $editsSection
 Treat these as the user's preferences. Do not raise volume above what the user set unless form and fatigue clearly allow it, and keep a skipped exercise lighter. Exercises the user added that are not in the catalog below cannot be camera-tracked: never put them in the plan, but count them as extra training load.
 
 --- PROGRESSION DECISION RULES ---
-Evaluate the fatigue trend across all sets, then apply exactly one rule:
-• MAINTENANCE — if any set has 'High' fatigue: prescribe the same volume as today. Insert a rest day as Day 2 — label it "Active Recovery" with light stretching advice.
-• PROGRESSIVE OVERLOAD — if fatigue is 'Low' or 'Moderate' across all sets: safely escalate one of (a) +1–2 reps per set, (b) +1 set, or (c) a 5% load increase. Explain why in the intensity field.
+Evaluate the fatigue trend across the latest sets, then apply exactly one rule:
+• MAINTENANCE — if any set has 'High' fatigue: prescribe the same volume as the last session, and you may make ONE of the dates to plan an "Active Recovery" day with light stretching advice (use actionId "rest").
+• PROGRESSIVE OVERLOAD — if fatigue is 'Low' or 'Moderate' across all sets: safely escalate one of (a) +1–2 reps per set, (b) +1 set, or (c) a 5% load increase.
 
 Consider form score when choosing overload magnitude: a form score below 60% should reduce escalation; above 80% allows full escalation.
 
@@ -160,11 +171,11 @@ Apply these biometric rules on top of the fatigue decision:
 • If experienceLevel is 'Intermediate' or 'Advanced': all three escalation options are available.
 • If goal is 'Weight Loss': prefer higher reps (12–15) with shorter rest; avoid load increases.
 • If goal is 'Build Muscle': prefer +1–2 reps or +1 set; load increase only if form score is above 80%.
-• If goal is 'Improve Fitness': balance reps and sets evenly; mirror today's volume on maintenance days.
+• If goal is 'Improve Fitness': balance reps and sets evenly; mirror the last volume on maintenance days.
 • If age is above 50: prefer higher sets × lower reps over load increases.
 
 TUT (Time Under Tension) guidance — apply to the intensity field:
-• If average TUT across sets is below 2.0s: add a tempo cue, e.g. "Focus on a 3s lowering phase — control the movement".
+• If average TUT across sets is below 2.0s: add a tempo cue, e.g. "Focus on a 3s lowering phase".
 • If average TUT is above 4.0s: acknowledge the strong time under tension; apply full overload if fatigue permits.
 
 --- EXERCISE CATALOG ---
@@ -174,44 +185,15 @@ Only assign exercises from this list. The actionId must match exactly:
 
 --- OUTPUT FORMAT ---
 Return a single raw JSON object. No markdown, no code fences, no commentary outside the JSON.
-All string values must be derived from the user's actual data. The title must reflect their goal. The coachNote is one plain sentence explaining why the plan looks this way, using their real form score or fatigue and the progression decision you made. The `date` and `time` fields are mandatory on every SessionCard and must be computed from the CURRENT LOCAL TIME anchor above.
+The "sessions" array has exactly ${dateList.length} card(s), one per date to plan, using those exact "date" strings. The title must reflect their goal. The coachNote is one plain sentence explaining why the new day(s) look this way, using their real form score or fatigue and the progression decision you made.
 
 JSON schema (replace every angle-bracket field with computed content):
 {
   "type": "WorkoutPlanView",
   "title": "<concise motivating title tailored to their specific goal and level>",
-  "coachNote": "<exactly 1 short, simple sentence, max 20 words, saying why this plan: the key number and the decision, e.g. 'Form held at 84% with low fatigue, so reps go up by one.'>",
+  "coachNote": "<exactly 1 short, simple sentence, max 20 words, saying why: the key number and the decision, e.g. 'Form held at 84% with low fatigue, so reps go up by one.'>",
   "sessions": [
-    {
-      "type": "SessionCard",
-      "day": "Day 1",
-      "date": "${fmt(day1)}",
-      "time": "<HH:MM AM/PM, e.g. 08:00 AM>",
-      "exercise": "<exercise name from catalog>",
-      "volume": "<computed sets × reps, e.g. '3 sets × 12 reps'>",
-      "intensity": "<specific instruction: e.g. 'Increase to 12 reps per set — your Low fatigue and 84% form score support full overload'>",
-      "actionId": "<exactly 'start_squat' or 'start_bicep_curl'>"
-    },
-    {
-      "type": "SessionCard",
-      "day": "Day 2",
-      "date": "${fmt(day2)}",
-      "time": "<HH:MM AM/PM>",
-      "exercise": "<exercise name from catalog>",
-      "volume": "<computed sets × reps>",
-      "intensity": "<specific instruction>",
-      "actionId": "<exactly 'start_squat' or 'start_bicep_curl'>"
-    },
-    {
-      "type": "SessionCard",
-      "day": "Day 3",
-      "date": "${fmt(day3)}",
-      "time": "<HH:MM AM/PM>",
-      "exercise": "<exercise name from catalog>",
-      "volume": "<computed sets × reps>",
-      "intensity": "<specific instruction>",
-      "actionId": "<exactly 'start_squat' or 'start_bicep_curl'>"
-    }
+$cardSchema
   ]
 }
 ''';

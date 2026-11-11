@@ -48,6 +48,19 @@ DateTime? parsePlanDate(String raw, DateTime now) {
   return best;
 }
 
+/// A plan card's date. Uses the exact `isoDate` ("2026-11-12") the app stores
+/// on every saved card, and falls back to the display `date` ("Thu, Nov 12",
+/// no year) for plans saved before that field existed.
+DateTime? cardDate(Map<dynamic, dynamic> card, DateTime now) {
+  final iso = card['isoDate'];
+  if (iso is String) {
+    final d = DateTime.tryParse(iso);
+    if (d != null) return DateTime(d.year, d.month, d.day);
+  }
+  final raw = card['date'];
+  return raw is String ? parsePlanDate(raw, now) : null;
+}
+
 /// One plan card is a rest day when the user skipped it, or (for AI cards)
 /// its day/exercise name says "Active Recovery" or "Rest", or it has no start
 /// action. The coach tip and volume are not checked: "rest 60 s between
@@ -73,7 +86,7 @@ List<PlanDay> planDays(Map<String, dynamic>? plan, DateTime now) {
   if (sessions is! List) return const [];
   final days = <PlanDay>[];
   for (final s in sessions.whereType<Map>()) {
-    final date = s['date'] is String ? parsePlanDate(s['date'], now) : null;
+    final date = cardDate(s, now);
     if (date == null) continue;
     final isRest = isRestSession(s);
     final label =

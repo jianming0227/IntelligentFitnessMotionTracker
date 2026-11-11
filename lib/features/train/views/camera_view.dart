@@ -20,10 +20,23 @@ import '../widgets/coaching_sheet.dart';
 import '../widgets/form_gauge.dart';
 import '../widgets/pose_painter.dart';
 
-class CameraView extends StatefulWidget {
-  const CameraView({super.key, required this.exercise});
+/// GoRouter extra for /train/camera when a workout starts from a plan card,
+/// so the finished session can be linked to that card. A bare [Exercise]
+/// extra still works for every other entry point.
+class CameraLaunch {
+  const CameraLaunch(this.exercise, {this.planSessionId});
 
   final Exercise exercise;
+  final String? planSessionId;
+}
+
+class CameraView extends StatefulWidget {
+  const CameraView({super.key, required this.exercise, this.planSessionId});
+
+  final Exercise exercise;
+
+  /// The plan card this workout was started from, if any.
+  final String? planSessionId;
 
   @override
   State<CameraView> createState() => _CameraViewState();
@@ -720,6 +733,7 @@ class _CameraViewState extends State<CameraView> {
               extra: SessionSummaryData(
                 exerciseName: widget.exercise.name,
                 sets: _completedSets,
+                planSessionId: widget.planSessionId,
               ),
             );
           }
@@ -762,7 +776,11 @@ class _CameraViewState extends State<CameraView> {
     AppLog.warn('Camera', 'DEBUG: skipped to results with fake sets');
     context.go(
       '/session/summary',
-      extra: SessionSummaryData(exerciseName: widget.exercise.name, sets: sets),
+      extra: SessionSummaryData(
+        exerciseName: widget.exercise.name,
+        sets: sets,
+        planSessionId: widget.planSessionId,
+      ),
     );
   }
 

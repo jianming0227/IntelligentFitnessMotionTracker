@@ -9,6 +9,20 @@ enum PlanCardStatus { upcoming, done, missed, skipped }
 /// What the user picked in the detail sheet.
 enum PlanCardAction { play, toggleDone, edit, toggleSkip, delete }
 
+/// "Today" / "Tomorrow" for those two days, else null (the date says it).
+/// Replaces Gemini's "Day 1/2/3", which stops making sense in a rolling plan.
+String? _relativeDay(Map<String, dynamic> card) {
+  final now = DateTime.now();
+  final d = cardDate(card, now);
+  if (d == null) return null;
+  final diff = d.difference(DateTime(now.year, now.month, now.day)).inDays;
+  return switch (diff) {
+    0 => 'Today',
+    1 => 'Tomorrow',
+    _ => null,
+  };
+}
+
 // ── A1-A4: compact day card ──────────────────────────────────────────────────
 
 class PlanDayCard extends StatelessWidget {
@@ -69,9 +83,9 @@ class PlanDayCard extends StatelessWidget {
                             skipped
                                 ? '$exercise skipped'
                                 : [
-                                    card['userAdded'] == true
-                                        ? 'Your workout'
-                                        : card['day'],
+                                    if (card['userAdded'] == true)
+                                      'Your workout',
+                                    ?_relativeDay(card),
                                     card['date'],
                                   ].whereType<String>().join(' · '),
                             style: tt.bodySmall?.copyWith(color: muted),

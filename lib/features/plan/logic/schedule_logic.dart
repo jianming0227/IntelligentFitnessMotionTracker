@@ -38,7 +38,7 @@ List<SessionRecord> sessionsOn(List<SessionRecord> records, DateTime day) => [
 ];
 
 /// The plan's `SessionCard` nodes dated on [day]. Plan dates carry no year,
-/// so they are resolved against [now] (see [parsePlanDate]).
+/// so they are resolved against [now] (see [cardDate]).
 List<Map<String, dynamic>> planCardsOn(
   Map<String, dynamic> plan,
   DateTime day,
@@ -48,7 +48,7 @@ List<Map<String, dynamic>> planCardsOn(
   if (sessions is! List) return const [];
   return [
     for (final s in sessions.whereType<Map<String, dynamic>>())
-      if (s['date'] is String && parsePlanDate(s['date'], now) == _day(day)) s,
+      if (cardDate(s, now) == _day(day)) s,
   ];
 }
 

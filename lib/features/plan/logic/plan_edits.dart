@@ -94,9 +94,7 @@ List<PlanEntry> planEntriesOn(
   if (sessions is! List) return const [];
   return [
     for (final (i, s) in sessions.indexed)
-      if (s is Map<String, dynamic> &&
-          s['date'] is String &&
-          parsePlanDate(s['date'], now) == _day(day))
+      if (s is Map<String, dynamic> && cardDate(s, now) == _day(day))
         (index: i, card: s),
   ];
 }
@@ -122,7 +120,14 @@ void _write(Map<String, dynamic> card, SessionEdit e) {
   card['volume'] = volumeLabel(e.sets, e.reps);
   card['time'] = e.time;
   card['date'] = shortDate(e.date);
+  card['isoDate'] = isoDay(e.date);
 }
+
+/// "2026-11-12": the exact date stored on cards and in plan_sessions.
+String isoDay(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-'
+    '${d.month.toString().padLeft(2, '0')}-'
+    '${d.day.toString().padLeft(2, '0')}';
 
 /// B1/B2/B4: change exercise, sets, reps, time or date of card [index].
 Map<String, dynamic> editSession(

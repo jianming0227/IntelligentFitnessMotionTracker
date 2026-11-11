@@ -1,8 +1,9 @@
 -- FitForm demo account seed.
 --
 -- Run in Supabase dashboard → SQL Editor → paste → Run. Safe to re-run:
--- creates the demo user once, then wipes and re-inserts its profile, plan and
--- 14 days of workout sessions so every run starts from the same data.
+-- creates the demo user once, then wipes and re-inserts its profile, plan,
+-- dated plan rows and 14 days of workout sessions so every run starts from
+-- the same data. Needs the migrations in supabase/migrations/ applied first.
 --
 -- Login in the app with:  demo@fitform.app / FitFormDemo123
 -- (throwaway demo credentials, change them below if this project is public)
@@ -32,6 +33,8 @@ declare
   fatigue    numeric;
   started    timestamp;
   sets       jsonb;
+  cards      jsonb;
+  v_plan_id  uuid;
 begin
   -- 1. Demo auth user (created once) ---------------------------------------
   select id into v_uid from auth.users where email = v_email;
@@ -64,6 +67,7 @@ begin
   end if;
 
   -- 2. Reset demo data ------------------------------------------------------
+  delete from public.plan_sessions where user_id = v_uid;
   delete from public.workout_sessions where user_id = v_uid;
   delete from public.plans where user_id = v_uid;
 
@@ -128,36 +132,54 @@ begin
   end loop;
 
   -- 4. Ready-made plan so the Plan tab isn't empty --------------------------
-  -- Dates use the same format Gemini writes ("Wed, Nov 11") and are filled in
-  -- from v_today, so the plan always sits on the next few days.
+  -- Cards carry the same fields the app writes: an "id" (also the
+  -- plan_sessions row id), the display "date" in Gemini's format
+  -- ("Wed, Nov 11") and the exact "isoDate". Dates start from v_today, so
+  -- the plan always sits on the next few days.
+  cards := (
+    select jsonb_agg(jsonb_build_object(
+      'type', 'SessionCard',
+      'id', gen_random_uuid(),
+      'day', c.day_label,
+      'date', to_char(v_today + make_interval(days => c.offset_days), 'Dy, Mon FMDD'),
+      'isoDate', to_char(v_today + make_interval(days => c.offset_days), 'YYYY-MM-DD'),
+      'time', '08:00 AM',
+      'exercise', c.exercise,
+      'volume', c.sets || ' sets x ' || c.reps || ' reps',
+      'sets', c.sets,
+      'reps', c.reps,
+      'actionId', c.action_id
+    ) order by c.offset_days)
+    from (values
+      ('Day 1', 1, 'Squat',      3, 11, 'start_squat'),
+      ('Day 2', 3, 'Bicep Curl', 3, 10, 'start_bicep_curl'),
+      ('Day 3', 5, 'Squat',      4, 10, 'start_squat')
+    ) as c(day_label, offset_days, exercise, sets, reps, action_id)
+  );
+
   insert into public.plans (user_id, plan_json, exercise_name, created_at)
-  values (v_uid, replace(replace(replace($json${
-    "type": "WorkoutPlanView",
-    "title": "Muscle Building: Progressive Overload Block",
-    "coachNote": "Squat form is up to the low 80s. Curl form is still in the 60s, so this block slows the curl down and adds one squat rep.",
-    "sessions": [
-      {"type": "SessionCard", "day": "Day 1", "date": "{{D1}}", "time": "08:00 AM",
-       "exercise": "Squat", "volume": "3 sets x 11 reps",
-       "intensity": "Keep knee angle below 95 degrees at the bottom.",
-       "actionId": "start_squat"},
-      {"type": "SessionCard", "day": "Day 2", "date": "{{D2}}", "time": "08:00 AM",
-       "exercise": "Bicep Curl", "volume": "3 sets x 10 reps",
-       "intensity": "Slow 3-second lowering, full extension every rep.",
-       "actionId": "start_bicep_curl"},
-      {"type": "SessionCard", "day": "Day 3", "date": "{{D3}}", "time": "08:00 AM",
-       "exercise": "Squat", "volume": "4 sets x 10 reps",
-       "intensity": "Add a fourth set. Depth and knee tracking over speed.",
-       "actionId": "start_squat"}
-    ]
-  }$json$,
-    '{{D1}}', to_char(v_today + interval '1 day', 'Dy, Mon FMDD')),
-    '{{D2}}', to_char(v_today + interval '3 days', 'Dy, Mon FMDD')),
-    '{{D3}}', to_char(v_today + interval '5 days', 'Dy, Mon FMDD'))::jsonb,
-    'Squat', now())
+  values (v_uid, jsonb_build_object(
+    'type', 'WorkoutPlanView',
+    'title', 'Muscle Building: Progressive Overload Block',
+    'coachNote', 'Squat form is in the low 80s with low fatigue, so squats get one more rep.',
+    'sessions', cards
+  ), 'Squat', now())
   on conflict (user_id) do update set
     plan_json = excluded.plan_json,
     exercise_name = excluded.exercise_name,
-    created_at = excluded.created_at;
+    created_at = excluded.created_at
+  returning id into v_plan_id;
+
+  -- 5. The same cards as dated rows (what the app mirrors on every save) ----
+  insert into public.plan_sessions (
+    id, user_id, plan_id, session_date, session_time, day_label,
+    exercise_id, exercise_name, sets, reps, status, source
+  )
+  select (c->>'id')::uuid, v_uid, v_plan_id, (c->>'isoDate')::date,
+         c->>'time', c->>'day',
+         replace(c->>'actionId', 'start_', ''), c->>'exercise',
+         (c->>'sets')::int, (c->>'reps')::int, 'planned', 'ai'
+  from jsonb_array_elements(cards) c;
 
   raise notice 'Seeded % sessions for %', array_length(v_days, 1), v_email;
 end $$;

@@ -17,18 +17,25 @@ import '../../train/models/set_metrics.dart';
 
 // Passed via GoRouter extra when navigating to /session/summary.
 class SessionSummaryData {
-  const SessionSummaryData({required this.exerciseName, required this.sets});
+  const SessionSummaryData({
+    required this.exerciseName,
+    required this.sets,
+    this.planSessionId,
+  });
 
   final String exerciseName;
   final List<SetMetrics> sets;
+
+  /// The plan card this workout was started from, if any.
+  final String? planSessionId;
 }
 
-enum _PlanStatus { generating, ready, failed }
+enum _PlanStatus { generating, ready, upToDate, failed }
 
 // FR-3.2: Session summary screen.
-// On open: saves the session once (local history + Supabase), then starts
-// adaptive plan generation without waiting for it. planProvider is app-wide,
-// so generation keeps running if the user leaves this page.
+// On open: saves the session once (local history + Supabase) and ticks its
+// plan card, then updates the rolling plan without blocking the page.
+// planProvider is app-wide, so the update keeps running if the user leaves.
 class SessionSummaryView extends ConsumerStatefulWidget {
   const SessionSummaryView({super.key, required this.data});
 
@@ -60,8 +67,10 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
     // Gemini gets the history from before this session; today's sets are
     // passed separately.
     final history = List<String>.of(prefs.getStringList(_historyKey) ?? []);
-    unawaited(_generatePlan(container, history));
+    // Save (and tick the plan card) first: the plan update must see today's
+    // card as done, or it would overwrite the tick.
     await _saveSession(container, prefs, history);
+    unawaited(_generatePlan(container, history));
   }
 
   Future<void> _generatePlan(
@@ -70,16 +79,24 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
   ) async {
     final profile =
         container.read(profileProvider).value ?? UserProfileBiometrics.defaults;
-    final ok = await container
+    // A workout was just done: tomorrow's untouched card may adapt to it.
+    final result = await container
         .read(planProvider.notifier)
         .generateAdaptivePlan(
           exerciseName: widget.data.exerciseName,
           sets: widget.data.sets,
           biometrics: profile,
           sessionHistory: history,
+          replanTomorrow: true,
         );
     if (mounted) {
-      setState(() => _planStatus = ok ? _PlanStatus.ready : _PlanStatus.failed);
+      setState(
+        () => _planStatus = switch (result) {
+          PlanUpdate.added => _PlanStatus.ready,
+          PlanUpdate.upToDate => _PlanStatus.upToDate,
+          PlanUpdate.failed => _PlanStatus.failed,
+        },
+      );
     }
   }
 
@@ -100,8 +117,11 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
     );
 
     // Best-effort write to Supabase workout_sessions.
+    final planSessionId = widget.data.planSessionId;
+    String? sessionId;
     try {
-      await SupabaseService().insertWorkoutSession(
+      sessionId = await SupabaseService().insertWorkoutSession(
+        planSessionId: planSessionId,
         exerciseName: widget.data.exerciseName,
         setsCompleted: widget.data.sets.length,
         sessionData: widget.data.sets
@@ -126,6 +146,15 @@ class _SessionSummaryViewState extends ConsumerState<SessionSummaryView> {
     } catch (e, st) {
       AppLog.error('Supabase', 'Session save failed', e, st);
     }
+    // Tick the plan card (and its plan_sessions row): the card it was started
+    // from, or today's card of the same exercise.
+    await container
+        .read(planProvider.notifier)
+        .markWorkoutDone(
+          exerciseName: widget.data.exerciseName,
+          planSessionId: planSessionId,
+          workoutSessionId: sessionId,
+        );
     // Home + Progress re-read history so the new session shows up.
     container.invalidate(sessionHistoryProvider);
   }
@@ -506,7 +535,12 @@ class _PlanStatusLine extends StatelessWidget {
       ),
       _PlanStatus.ready => (
         Icon(Icons.check_circle_rounded, size: 16, color: cs.primary),
-        'New plan ready',
+        'Plan updated',
+        cs.primary,
+      ),
+      _PlanStatus.upToDate => (
+        Icon(Icons.check_circle_rounded, size: 16, color: cs.primary),
+        'Plan already covers the next 3 days',
         cs.primary,
       ),
       _PlanStatus.failed => (

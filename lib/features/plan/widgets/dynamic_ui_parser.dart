@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../progress/logic/mascot_mood.dart';
 import '../../progress/models/session_record.dart';
+import '../../train/views/camera_view.dart';
 import '../logic/plan_edits.dart';
 import '../logic/schedule_logic.dart';
 import 'plan_day_card.dart';
@@ -128,7 +129,13 @@ class _WorkoutPlanViewState extends State<_WorkoutPlanView> {
     switch (action) {
       case PlanCardAction.play:
         final target = exerciseForActionId(card['actionId'] as String?);
-        if (target != null) context.push('/train/camera', extra: target);
+        if (target != null) {
+          // The card id links the finished workout back to this card.
+          context.push(
+            '/train/camera',
+            extra: CameraLaunch(target, planSessionId: card['id'] as String?),
+          );
+        }
       case PlanCardAction.toggleDone:
         _save(setDone(plan, entry.index, card['done'] != true));
       case PlanCardAction.toggleSkip:

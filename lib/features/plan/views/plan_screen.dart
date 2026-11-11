@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -43,11 +45,28 @@ class PlanScreen extends ConsumerWidget {
                 data: (json) => json == null || json.isEmpty
                     /// 7. Receive the decoded json and pass to parser to call buildDynamicWidget
                     ? _EmptyView(onGenerate: () => _refresh(ref))
-                    // Pull down to regenerate. Returns at once: the loading
-                    // view takes over while Gemini works.
+                    // Pull down to fill empty days. Returns at once: the
+                    // loading view takes over while Gemini works.
                     : RefreshIndicator(
                         color: cs.primary,
-                        onRefresh: () async => _refresh(ref),
+                        onRefresh: () async {
+                          final messenger = ScaffoldMessenger.of(context);
+                          unawaited(
+                            _refresh(ref).then((r) {
+                              if (r != PlanUpdate.upToDate) return;
+                              messenger
+                                ..hideCurrentSnackBar()
+                                ..showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Plan is up to date: the next 3 days '
+                                      'are planned.',
+                                    ),
+                                  ),
+                                );
+                            }),
+                          );
+                        },
                         child: buildDynamicWidget(
                           json,
                           context,
@@ -67,10 +86,10 @@ class PlanScreen extends ConsumerWidget {
   }
 
   //2. Trigger the plan provider to listen and call refreshPlan together with the biometric profile
-  void _refresh(WidgetRef ref) {
+  Future<PlanUpdate> _refresh(WidgetRef ref) {
     final biometrics =
         ref.read(profileProvider).value ?? UserProfileBiometrics.defaults;
-    ref.read(planProvider.notifier).refreshPlan(biometrics: biometrics);
+    return ref.read(planProvider.notifier).refreshPlan(biometrics: biometrics);
   }
 }
 
