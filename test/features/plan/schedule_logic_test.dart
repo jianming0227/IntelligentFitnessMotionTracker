@@ -1,3 +1,4 @@
+import 'package:fitnessapp/features/plan/logic/plan_edits.dart';
 import 'package:fitnessapp/features/plan/logic/schedule_logic.dart';
 import 'package:fitnessapp/features/progress/models/session_record.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -57,18 +58,19 @@ void main() {
     expect(sessionsOn(records, DateTime(2026, 11, 10)), isEmpty);
   });
 
-  test('planCardsOn picks cards dated on that day', () {
-    final plan = {
+  test('planEntriesOn picks cards dated on that day, with their index', () {
+    final plan = <String, dynamic>{
       'sessions': [
         {'type': 'SessionCard', 'date': 'Wed, Nov 11', 'exercise': 'Squat'},
         {'type': 'SessionCard', 'date': 'Fri, Nov 13', 'exercise': 'Curl'},
         {'type': 'SessionCard', 'date': 'Mon', 'exercise': 'Bad date'},
       ],
     };
-    final cards = planCardsOn(plan, DateTime(2026, 11, 11), now);
-    expect(cards.map((c) => c['exercise']), ['Squat']);
-    expect(planCardsOn(plan, DateTime(2026, 11, 12), now), isEmpty);
-    expect(planCardsOn(const {}, DateTime(2026, 11, 11), now), isEmpty);
+    final entries = planEntriesOn(plan, DateTime(2026, 11, 11), now);
+    expect(entries.map((e) => e.card['exercise']), ['Squat']);
+    expect(entries.single.index, 0);
+    expect(planEntriesOn(plan, DateTime(2026, 11, 12), now), isEmpty);
+    expect(planEntriesOn(const {}, DateTime(2026, 11, 11), now), isEmpty);
   });
 
   group('firstSentences', () {
