@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/utils/app_log.dart';
 import '../../session/views/session_summary_view.dart';
+import '../data/pose_joints.dart';
 import '../models/exercise.dart';
 import '../models/rep_state_machine.dart';
 import '../models/set_metrics.dart';
@@ -324,14 +325,10 @@ class _CameraViewState extends State<CameraView> {
 
     _lastCueAt = now;
     _badFormSince = now;
-    // if bicep curl else squat
-    final cues = widget.exercise.id == 'bicep_curl'
-        ? [
-            'Full extension at the bottom',
-            'Squeeze at the top',
-            'Keep your elbow still',
-          ]
-        : ['Go deeper', 'Keep your chest up', 'Knees track over toes'];
+    // Per-exercise tips from the exercises table (`form_cues`).
+    final cues = widget.exercise.formCues.isEmpty
+        ? const ['Check your form', 'Slow and controlled']
+        : widget.exercise.formCues;
     _tts.speak(cues[DateTime.now().second % cues.length]);
   }
 
@@ -421,32 +418,11 @@ class _CameraViewState extends State<CameraView> {
   }
 
   /// Joint angle of each side, null where that side is below the confidence
-  /// threshold. Squat: hip → knee → ankle. Bicep curl: shoulder → elbow → wrist.
+  /// threshold. The three points come from the exercise's `joints` column,
+  /// e.g. squat hip → knee → ankle, bicep curl shoulder → elbow → wrist.
   (double?, double?) _sideAngles(Pose pose) {
-    final isCurl = widget.exercise.id == 'bicep_curl';
-    // Squat: hip → knee → ankle. Bicep curl: shoulder → elbow → wrist.
-    final left = isCurl
-        ? const [
-            PoseLandmarkType.leftShoulder,
-            PoseLandmarkType.leftElbow,
-            PoseLandmarkType.leftWrist,
-          ]
-        : const [
-            PoseLandmarkType.leftHip,
-            PoseLandmarkType.leftKnee,
-            PoseLandmarkType.leftAnkle,
-          ];
-    final right = isCurl
-        ? const [
-            PoseLandmarkType.rightShoulder,
-            PoseLandmarkType.rightElbow,
-            PoseLandmarkType.rightWrist,
-          ]
-        : const [
-            PoseLandmarkType.rightHip,
-            PoseLandmarkType.rightKnee,
-            PoseLandmarkType.rightAnkle,
-          ];
+    final left = landmarksFor(widget.exercise.joints, BodySide.left);
+    final right = landmarksFor(widget.exercise.joints, BodySide.right);
 
     double? angleOf(List<PoseLandmarkType> types) {
       final lms = [for (final t in types) pose.landmarks[t]];

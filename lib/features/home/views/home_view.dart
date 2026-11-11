@@ -12,6 +12,7 @@ import '../../profile/models/user_profile_biometrics.dart';
 import '../../profile/providers/profile_providers.dart';
 import '../../progress/logic/progress_stats.dart';
 import '../../progress/providers/progress_providers.dart';
+import '../../train/data/exercise_images.dart';
 import '../../train/models/exercise.dart';
 
 /// Workouts per week that count as 100% on the This Week ring. The app does
@@ -325,42 +326,6 @@ class _ExerciseCarouselState extends State<_ExerciseCarousel> {
   }
 }
 
-/// Per-exercise hero photo + framing controls. Edit one entry to retune just
-/// that card; missing entries fall back to the icon-gradient placeholder.
-///
-/// - [alignment]   which part of the photo stays visible under BoxFit.cover
-///                 (x, y) range −1 to +1; (0, +0.35) bias toward the bottom.
-/// - [scale]       1.0 = no zoom. >1 enlarges the photo (clipped by the card).
-/// - [scaleAlignment] pivot point for the zoom — usually match [alignment].
-class _CardImageConfig {
-  const _CardImageConfig({
-    required this.path,
-    this.alignment = Alignment.center,
-    this.scale = 1.0,
-    this.scaleAlignment = Alignment.center,
-  });
-
-  final String path;
-  final Alignment alignment;
-  final double scale;
-  final Alignment scaleAlignment;
-}
-
-const Map<String, _CardImageConfig> _exerciseImages = {
-  'squat': _CardImageConfig(
-    path: 'assets/images/squat.png',
-    alignment: Alignment(0, 0.35),
-    scale: 1.4,
-    scaleAlignment: Alignment(-1, 0.5),
-  ),
-  'bicep_curl': _CardImageConfig(
-    path: 'assets/images/bicep.png',
-    alignment: Alignment(0, 0),
-    scale: 1.4,
-    scaleAlignment: Alignment(-1.01, -0.5),
-  ),
-};
-
 class _ExerciseCard extends StatelessWidget {
   const _ExerciseCard({required this.exercise});
 
@@ -371,7 +336,6 @@ class _ExerciseCard extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final tt = Theme.of(context).textTheme;
-    final image = _exerciseImages[exercise.id];
 
     return Material(
       color: Colors.transparent,
@@ -383,7 +347,7 @@ class _ExerciseCard extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              _CardBackground(config: image, isDark: isDark),
+              _CardBackground(exercise: exercise, isDark: isDark),
               // Foreground gradient — darkens the bottom so the kcal stat
               // and description stay readable over any photo.
               const DecoratedBox(
@@ -471,27 +435,28 @@ class _ExerciseCard extends StatelessWidget {
   }
 }
 
-/// Card background: real photo (driven by [_CardImageConfig]) if available,
-/// otherwise an icon-on-gradient placeholder. Either way it fills the parent.
+/// Card background: the exercise photo cropped by its `image_framing` (from
+/// the exercises table) if it has one, otherwise an icon-on-gradient
+/// placeholder. Either way it fills the parent.
 class _CardBackground extends StatelessWidget {
-  const _CardBackground({required this.config, required this.isDark});
+  const _CardBackground({required this.exercise, required this.isDark});
 
-  final _CardImageConfig? config;
+  final Exercise exercise;
   final bool isDark;
 
   @override
   Widget build(BuildContext context) {
     final fallback = _FallbackBackground(isDark: isDark);
-    final cfg = config;
-    if (cfg == null) return fallback;
+    final path = exercise.imageUrl;
+    if (path == null) return fallback;
+    final f = exercise.imageFraming;
     return Transform.scale(
-      scale: cfg.scale,
-      alignment: cfg.scaleAlignment,
-      child: Image.asset(
-        cfg.path,
-        fit: BoxFit.cover,
-        alignment: cfg.alignment,
-        errorBuilder: (_, _, _) => fallback,
+      scale: f.zoom,
+      alignment: Alignment(f.zoomX, f.zoomY),
+      child: exerciseImage(
+        path,
+        alignment: Alignment(f.alignX, f.alignY),
+        fallback: (_) => fallback,
       ),
     );
   }

@@ -1,11 +1,9 @@
-import 'dart:convert';
-
-import 'package:flutter/services.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../models/exercise.dart';
 
 /// A rotatable 3D demo for one exercise: an animated glTF model (made in
 /// Blender with a free MakeHuman/MPFB character, see design_source/) plus a
-/// still poster shown while the 3D view loads.
+/// still poster shown while the 3D view loads. Comes from the `tutorial`
+/// column of the `exercises` table.
 class ExerciseTutorial {
   const ExerciseTutorial({
     required this.model,
@@ -17,12 +15,13 @@ class ExerciseTutorial {
     required this.fullOrbit,
     required this.fullTarget,
     this.heroFieldOfView = '28deg',
+    this.cues = const [],
   });
 
-  /// `assets/models/<id>.glb`
+  /// `.glb` file: asset path or public URL.
   final String model;
 
-  /// `assets/tutorials/<id>_poster.png`
+  /// Still image: asset path or public URL.
   final String poster;
 
   /// Animation clip inside the .glb.
@@ -32,8 +31,7 @@ class ExerciseTutorial {
   final double loopSeconds;
 
   /// `<model-viewer>` camera for the detail-page hero (`theta phi radius`)
-  /// and the point it looks at (`x y z`, metres). Chosen per exercise: the
-  /// curl frames the upper body, the squat the whole body from the side.
+  /// and the point it looks at (`x y z`, metres).
   final String heroOrbit;
   final String heroTarget;
   final String heroFieldOfView;
@@ -41,41 +39,37 @@ class ExerciseTutorial {
   /// Starting camera in the fullscreen viewer (the user can rotate/zoom).
   final String fullOrbit;
   final String fullTarget;
+
+  /// Timed captions shown over the fullscreen demo, sorted by time.
+  final List<TutorialCue> cues;
+
+  /// Null when [raw] is missing or lacks the model, poster or animation.
+  static ExerciseTutorial? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final model = raw['model'], poster = raw['poster'];
+    final animation = raw['animation'], loop = raw['loopSeconds'];
+    if (model is! String || poster is! String || animation is! String) {
+      return null;
+    }
+    String s(String k, String d) => raw[k] is String ? raw[k] as String : d;
+    return ExerciseTutorial(
+      model: model,
+      poster: poster,
+      animation: animation,
+      loopSeconds: loop is num ? loop.toDouble() : 5,
+      heroOrbit: s('heroOrbit', '0deg 80deg auto'),
+      heroTarget: s('heroTarget', 'auto auto auto'),
+      heroFieldOfView: s('heroFieldOfView', '28deg'),
+      fullOrbit: s('fullOrbit', '0deg 80deg auto'),
+      fullTarget: s('fullTarget', 'auto auto auto'),
+      cues: parseCues(raw['cues']),
+    );
+  }
 }
 
-/// Exercises that have a 3D demo. Others keep their hero photo.
-const Map<String, ExerciseTutorial> exerciseTutorials = {
-  'squat': ExerciseTutorial(
-    model: 'assets/models/squat.glb',
-    poster: 'assets/tutorials/squat_poster.png',
-    animation: 'Squat',
-    // 1.4 s muscle-highlight pause (quads + glutes glow), then one rep.
-    loopSeconds: 5.8,
-    // Three-quarter side view: hip and knee angles read clearly.
-    // Pulled back and aimed low so the legs stay above the info panel.
-    heroOrbit: '-60deg 80deg 4.6m',
-    heroTarget: '0m 0.85m 0m',
-    heroFieldOfView: '30deg',
-    // 'auto' radius/target: model-viewer frames the whole body for the screen.
-    fullOrbit: '-60deg 80deg auto',
-    fullTarget: 'auto auto auto',
-  ),
-  'bicep_curl': ExerciseTutorial(
-    model: 'assets/models/bicep_curl.glb',
-    poster: 'assets/tutorials/bicep_curl_poster.png',
-    animation: 'BicepCurl',
-    // 1.4 s muscle-highlight pause (biceps glow), then one rep.
-    loopSeconds: 5.6,
-    // Front three-quarter, upper body above the info panel.
-    heroOrbit: '-30deg 80deg 2.9m',
-    heroTarget: '0m 1.15m 0m',
-    fullOrbit: '-30deg 80deg auto',
-    fullTarget: 'auto auto auto',
-  ),
-};
-
+/// The 3D demo of an exercise, null when it has none.
 ExerciseTutorial? tutorialFor(String exerciseId) =>
-    exerciseTutorials[exerciseId];
+    Exercise.byId(exerciseId)?.tutorial;
 
 /// One form cue shown from [at] seconds into each loop.
 class TutorialCue {
@@ -85,20 +79,15 @@ class TutorialCue {
   final String text;
 }
 
-/// Parses `tutorial_cues.json`: `{ "<id>": [{"at": 0.3, "text": "..."}] }`.
-/// Cues come back sorted by time; malformed entries are skipped.
-Map<String, List<TutorialCue>> parseTutorialCues(String json) {
-  final raw = jsonDecode(json);
-  if (raw is! Map) return const {};
-  return {
-    for (final MapEntry(:key, :value) in raw.entries)
-      if (value is List)
-        '$key': [
-          for (final c in value.whereType<Map>())
-            if (c['at'] is num && c['text'] is String)
-              TutorialCue(at: (c['at'] as num).toDouble(), text: c['text']),
-        ]..sort((a, b) => a.at.compareTo(b.at)),
-  };
+/// Parses `[{"at": 0.3, "text": "..."}]`, sorted by time; malformed entries
+/// are skipped.
+List<TutorialCue> parseCues(Object? raw) {
+  if (raw is! List) return const [];
+  return [
+    for (final c in raw.whereType<Map>())
+      if (c['at'] is num && c['text'] is String)
+        TutorialCue(at: (c['at'] as num).toDouble(), text: c['text'] as String),
+  ]..sort((a, b) => a.at.compareTo(b.at));
 }
 
 /// The cue to show [elapsed] after the animation started, given a loop of
@@ -115,16 +104,6 @@ TutorialCue? cueAt(
   for (final c in cues) {
     if (c.at <= s) current = c;
   }
-  return current ?? (elapsed.inMilliseconds / 1000 >= loopSeconds ? cues.last : null);
+  return current ??
+      (elapsed.inMilliseconds / 1000 >= loopSeconds ? cues.last : null);
 }
-
-final tutorialCuesProvider =
-    FutureProvider<Map<String, List<TutorialCue>>>((ref) async {
-  try {
-    return parseTutorialCues(
-      await rootBundle.loadString('assets/tutorials/tutorial_cues.json'),
-    );
-  } catch (_) {
-    return const {};
-  }
-});

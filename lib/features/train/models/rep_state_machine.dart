@@ -50,13 +50,14 @@ class RepStateMachine {
 
     final bool atBottom;
     final bool atTop;
-    // The
-    if (exercise.id == 'bicep_curl') {
-      atBottom = angle > exercise.repBottomAngleStrict; // arm extended
-      atTop = angle < exercise.repTopAngleStrict; // arm curled
-    } else {
-      atBottom = angle < exercise.repBottomAngleStrict; // squat depth
-      atTop = angle > exercise.repTopAngleStrict; // standing
+    // Direction from the exercise's `angle_at_bottom` column.
+    switch (exercise.angleAtBottom) {
+      case AngleAtBottom.large: // e.g. curl: arm extended → curled
+        atBottom = angle > exercise.repBottomAngleStrict;
+        atTop = angle < exercise.repTopAngleStrict;
+      case AngleAtBottom.small: // e.g. squat: standing → deep
+        atBottom = angle < exercise.repBottomAngleStrict;
+        atTop = angle > exercise.repTopAngleStrict;
     }
 
     final phaseAgeMs = _phaseEnteredAt == null

@@ -131,11 +131,10 @@ class _CourseRow extends StatelessWidget {
                   width: 140,
                   height: 96,
                   child: imagePath != null
-                      ? Image.asset(
+                      ? exerciseImage(
                           imagePath,
-                          fit: BoxFit.cover,
                           alignment: const Alignment(0, -0.1),
-                          errorBuilder: (_, _, _) => const _ThumbFallback(),
+                          fallback: (_) => const _ThumbFallback(),
                         )
                       : const _ThumbFallback(),
                 ),

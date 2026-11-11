@@ -67,8 +67,7 @@ class _TutorialFullscreenViewState
   @override
   Widget build(BuildContext context) {
     final tutorial = tutorialFor(widget.exercise.id);
-    final cues = ref.watch(tutorialCuesProvider).value?[widget.exercise.id] ??
-        const <TutorialCue>[];
+    final cues = tutorial?.cues ?? const <TutorialCue>[];
     final tt = Theme.of(context).textTheme;
     final clock = _clock;
 
