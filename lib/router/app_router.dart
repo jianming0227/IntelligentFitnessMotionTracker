@@ -50,8 +50,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isDemo = ref.read(demoModeProvider);
       if (isDemo) return null;
 
-      final isLoggedIn =
-          Supabase.instance.client.auth.currentSession != null;
+      final isLoggedIn = Supabase.instance.client.auth.currentSession != null;
       final loc = state.matchedLocation;
       final onAuthScreen = loc == '/login' || loc == '/register';
 
@@ -73,10 +72,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         ],
       ),
       // Full-screen routes — no bottom nav
-      GoRoute(
-        path: '/survey',
-        builder: (_, _) => const BiometricSurveyView(),
-      ),
+      GoRoute(path: '/survey', builder: (_, _) => const BiometricSurveyView()),
       GoRoute(
         path: '/train/detail',
         builder: (context, state) =>
@@ -89,8 +85,15 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/train/camera',
-        builder: (context, state) =>
-            CameraView(exercise: state.extra as Exercise),
+        // Plan cards pass a CameraLaunch (links the workout to the card);
+        // everything else passes the Exercise.
+        builder: (context, state) => switch (state.extra) {
+          final CameraLaunch l => CameraView(
+            exercise: l.exercise,
+            planSessionId: l.planSessionId,
+          ),
+          final extra => CameraView(exercise: extra as Exercise),
+        },
       ),
       GoRoute(
         path: '/session/summary',

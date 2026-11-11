@@ -2,6 +2,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/utils/app_log.dart';
+import '../features/plan/logic/plan_edits.dart';
+import '../features/plan/logic/plan_sync.dart';
 
 // FR-1.1: Central auth service — wraps Supabase email/password auth operations.
 class SupabaseService {
@@ -42,36 +44,100 @@ class SupabaseService {
     required String fitnessGoal,
     required String experienceLevel,
   }) async {
-    await _client.from('profiles').upsert(
-      {
-        'id': userId,
-        'gender': gender,
-        'age': age,
-        'height_cm': heightCm,
-        'weight_kg': weightKg,
-        'goal': fitnessGoal,
-        'experience_level': experienceLevel,
-        'updated_at': DateTime.now().toIso8601String(),
-      },
-      onConflict: 'id',
-    );
+    await _client.from('profiles').upsert({
+      'id': userId,
+      'gender': gender,
+      'age': age,
+      'height_cm': heightCm,
+      'weight_kg': weightKg,
+      'goal': fitnessGoal,
+      'experience_level': experienceLevel,
+      'updated_at': DateTime.now().toIso8601String(),
+    }, onConflict: 'id');
   }
 
+  /// Saves the active plan JSON, then mirrors its cards into `plan_sessions`
+  /// (one dated row per card). Call with a plan from `withCardIds`.
   Future<void> upsertPlan({
     required Map<String, dynamic> planJson,
     required String exerciseName,
   }) async {
     final userId = currentUser?.id;
     if (userId == null) return;
-    await _client.from('plans').upsert(
-      {
-        'user_id': userId,
-        'plan_json': planJson,
-        'exercise_name': exerciseName,
-        'created_at': DateTime.now().toIso8601String(),
-      },
-      onConflict: 'user_id',
-    );
+    final saved = await _client
+        .from('plans')
+        .upsert({
+          'user_id': userId,
+          'plan_json': planJson,
+          'exercise_name': exerciseName,
+          'created_at': DateTime.now().toIso8601String(),
+        }, onConflict: 'user_id')
+        .select('id')
+        .single();
+    try {
+      await _syncPlanSessions(userId, saved['id'] as String?, planJson);
+    } catch (e) {
+      // Plan JSON is saved; the dated mirror catches up on the next save.
+      AppLog.warn('Supabase', 'plan_sessions sync skipped: $e');
+    }
+  }
+
+  /// Upserts one row per card, then removes rows for upcoming cards that are
+  /// no longer in the plan (deleted, or replaced by a new plan). Past rows
+  /// and done rows are kept: they are the plan history.
+  Future<void> _syncPlanSessions(
+    String userId,
+    String? planId,
+    Map<String, dynamic> planJson,
+  ) async {
+    final rows = planSessionRows(planJson, userId: userId, planId: planId);
+    if (rows.isNotEmpty) {
+      await _client.from('plan_sessions').upsert(rows, onConflict: 'id');
+    }
+    final today = isoDay(DateTime.now());
+    var stale = _client
+        .from('plan_sessions')
+        .delete()
+        .eq('user_id', userId)
+        .gte('session_date', today)
+        .neq('status', 'done');
+    if (rows.isNotEmpty) {
+      stale = stale.not('id', 'in', '(${rows.map((r) => r['id']).join(',')})');
+    }
+    await stale;
+    AppLog.ok('Supabase', 'plan_sessions synced (${rows.length} cards)');
+  }
+
+  /// Marks one planned workout done and links the finished session to it.
+  Future<void> markPlanSessionDone({
+    required String planSessionId,
+    required String? workoutSessionId,
+  }) async {
+    if (currentUser == null) return;
+    await _client
+        .from('plan_sessions')
+        .update({
+          'status': 'done',
+          'completed_session_id': ?workoutSessionId,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', planSessionId);
+  }
+
+  /// Planned workouts between [from] and [to] (inclusive), by date.
+  Future<List<Map<String, dynamic>>> fetchPlanSessions({
+    required DateTime from,
+    required DateTime to,
+  }) async {
+    final userId = currentUser?.id;
+    if (userId == null) return const [];
+    return _client
+        .from('plan_sessions')
+        .select()
+        .eq('user_id', userId)
+        .gte('session_date', isoDay(from))
+        .lte('session_date', isoDay(to))
+        .order('session_date');
   }
 
   /// Signed-in user's saved plan JSON. Null when there is no user, no plan,
@@ -136,23 +202,32 @@ class SupabaseService {
     }
   }
 
-  Future<void> insertWorkoutSession({
+  /// Saves a finished workout and returns its id (null with no signed-in
+  /// user). [planSessionId] links it to the plan card it was started from.
+  Future<String?> insertWorkoutSession({
     required String exerciseName,
     required int setsCompleted,
     required List<Map<String, dynamic>> sessionData,
+    String? planSessionId,
   }) async {
     final userId = currentUser?.id;
     if (userId == null) {
       AppLog.warn('Supabase', 'Session not saved: no signed-in user (demo?)');
-      return;
+      return null;
     }
-    await _client.from('workout_sessions').insert({
-      'user_id': userId,
-      'exercise_type': exerciseName,
-      'sets_completed': setsCompleted,
-      'session_data': sessionData,
-      'created_at': DateTime.now().toIso8601String(),
-    });
+    final row = await _client
+        .from('workout_sessions')
+        .insert({
+          'user_id': userId,
+          'exercise_type': exerciseName,
+          'sets_completed': setsCompleted,
+          'session_data': sessionData,
+          'created_at': DateTime.now().toIso8601String(),
+          'plan_session_id': ?planSessionId,
+        })
+        .select('id')
+        .single();
     AppLog.ok('Supabase', 'Session saved: $exerciseName, $setsCompleted sets');
+    return row['id'] as String?;
   }
 }

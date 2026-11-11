@@ -20,7 +20,7 @@ class ExerciseDetailView extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final imagePath = exerciseImageFor(exercise.id);
     final tutorial = tutorialFor(exercise.id);
-    final photo = _HeroImage(imagePath: imagePath, emoji: exercise.emoji);
+    final photo = _HeroImage(imagePath: imagePath);
 
     return Scaffold(
       backgroundColor: cs.surface,
@@ -37,10 +37,8 @@ class ExerciseDetailView extends StatelessWidget {
                       : TutorialModelHero(
                           tutorial: tutorial,
                           fallback: photo,
-                          onTap: () => context.push(
-                            '/train/tutorial',
-                            extra: exercise,
-                          ),
+                          onTap: () =>
+                              context.push('/train/tutorial', extra: exercise),
                         ),
                 ),
                 // Empty space at the bottom so the panel can sit on top.
@@ -94,30 +92,28 @@ class ExerciseDetailView extends StatelessWidget {
 // ── Hero photo ────────────────────────────────────────────────────────────────
 
 class _HeroImage extends StatelessWidget {
-  const _HeroImage({required this.imagePath, required this.emoji});
+  const _HeroImage({required this.imagePath});
 
   final String? imagePath;
-  final String emoji;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    if (imagePath == null) {
-      return Container(
-        color: cs.surfaceContainerHighest,
-        alignment: Alignment.center,
-        child: Text(emoji, style: const TextStyle(fontSize: 120)),
-      );
-    }
+    final fallback = Container(
+      color: cs.surfaceContainerHighest,
+      alignment: Alignment.center,
+      child: Icon(
+        Icons.fitness_center_rounded,
+        size: 96,
+        color: cs.onSurface.withValues(alpha: 0.3),
+      ),
+    );
+    if (imagePath == null) return fallback;
     return Image.asset(
       imagePath!,
       fit: BoxFit.cover,
       alignment: const Alignment(0, -0.1),
-      errorBuilder: (_, _, _) => Container(
-        color: cs.surfaceContainerHighest,
-        alignment: Alignment.center,
-        child: Text(emoji, style: const TextStyle(fontSize: 120)),
-      ),
+      errorBuilder: (_, _, _) => fallback,
     );
   }
 }

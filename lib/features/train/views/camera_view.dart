@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:go_router/go_router.dart';
@@ -19,10 +20,23 @@ import '../widgets/coaching_sheet.dart';
 import '../widgets/form_gauge.dart';
 import '../widgets/pose_painter.dart';
 
-class CameraView extends StatefulWidget {
-  const CameraView({super.key, required this.exercise});
+/// GoRouter extra for /train/camera when a workout starts from a plan card,
+/// so the finished session can be linked to that card. A bare [Exercise]
+/// extra still works for every other entry point.
+class CameraLaunch {
+  const CameraLaunch(this.exercise, {this.planSessionId});
 
   final Exercise exercise;
+  final String? planSessionId;
+}
+
+class CameraView extends StatefulWidget {
+  const CameraView({super.key, required this.exercise, this.planSessionId});
+
+  final Exercise exercise;
+
+  /// The plan card this workout was started from, if any.
+  final String? planSessionId;
 
   @override
   State<CameraView> createState() => _CameraViewState();
@@ -644,8 +658,11 @@ class _CameraViewState extends State<CameraView> {
     _setElapsed = Duration.zero;
     _repMachine.resetPhase();
     _sideSelector.reset();
-    AppLog.info('Camera', 'Set $_currentSet/$_totalSets started '
-        '(${widget.exercise.name})');
+    AppLog.info(
+      'Camera',
+      'Set $_currentSet/$_totalSets started '
+          '(${widget.exercise.name})',
+    );
     _setTicker?.cancel();
     _setTicker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted || _setStartTime == null) return;
@@ -716,10 +733,53 @@ class _CameraViewState extends State<CameraView> {
               extra: SessionSummaryData(
                 exerciseName: widget.exercise.name,
                 sets: _completedSets,
+                planSessionId: widget.planSessionId,
               ),
             );
           }
         },
+      ),
+    );
+  }
+
+  /// Debug builds only. Builds 3 believable sets (form dropping, fatigue
+  /// rising) and goes straight to the summary, skipping the camera work and
+  /// the per-set coaching calls. The session is saved like a real one.
+  void _debugSkipToResults() {
+    _setTicker?.cancel();
+    _restTimer?.cancel();
+    final rng = Random();
+    final now = DateTime.now();
+    final sets = [
+      for (var i = 0; i < _totalSets; i++)
+        () {
+          final reps = _targetReps - i - rng.nextInt(2);
+          final repMs = [
+            for (var r = 0; r < reps; r++) 2400 + r * 60 * (i + 1),
+          ];
+          final setMs = repMs.fold(0, (a, b) => a + b) + 3000;
+          final form = (0.86 - 0.08 * i - rng.nextDouble() * 0.04);
+          return SetMetrics(
+            setNumber: i + 1,
+            repsCompleted: reps,
+            formScore: form,
+            fatigueIndex: [0.05, 0.2, 0.4][i],
+            repDurationsMs: repMs,
+            completedAt: now.subtract(Duration(minutes: (_totalSets - i) * 2)),
+            tutMs: (setMs * form * 0.8).round(),
+            romScore: 0.9 - 0.04 * i,
+            repRomSpans: [for (var r = 0; r < reps; r++) 95.0 - i * 4 + r % 3],
+            setDurationMs: setMs,
+          );
+        }(),
+    ];
+    AppLog.warn('Camera', 'DEBUG: skipped to results with fake sets');
+    context.go(
+      '/session/summary',
+      extra: SessionSummaryData(
+        exerciseName: widget.exercise.name,
+        sets: sets,
+        planSessionId: widget.planSessionId,
       ),
     );
   }
@@ -1043,6 +1103,15 @@ class _CameraViewState extends State<CameraView> {
               ),
               const SizedBox(height: 8),
               _HudIcon(icon: Icons.home_rounded, onTap: () => context.pop()),
+              // Debug builds only: fake all 3 sets and jump to the summary.
+              if (kDebugMode) ...[
+                const SizedBox(height: 8),
+                _HudIcon(
+                  icon: Icons.bug_report_rounded,
+                  color: Colors.orange,
+                  onTap: _debugSkipToResults,
+                ),
+              ],
             ],
           ),
         ],
@@ -1650,9 +1719,14 @@ class _ScanningDotState extends State<_ScanningDot>
 
 /// Small dark-glass HUD icon button used along the top bar.
 class _HudIcon extends StatelessWidget {
-  const _HudIcon({required this.icon, required this.onTap});
+  const _HudIcon({
+    required this.icon,
+    required this.onTap,
+    this.color = Colors.white,
+  });
   final IconData icon;
   final VoidCallback onTap;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
@@ -1664,7 +1738,7 @@ class _HudIcon extends StatelessWidget {
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.all(10),
-          child: Icon(icon, size: 20, color: Colors.white),
+          child: Icon(icon, size: 20, color: color),
         ),
       ),
     );

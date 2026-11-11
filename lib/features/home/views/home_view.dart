@@ -211,16 +211,29 @@ class _AvatarBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return Container(
-      width: 52,
-      height: 52,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(color: cs.primary, shape: BoxShape.circle),
-      child: Text(
-        initial,
-        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-          color: cs.onPrimary,
-          fontWeight: FontWeight.w800,
+    // Tapping the avatar opens the Profile tab.
+    return Semantics(
+      button: true,
+      label: 'Open profile',
+      child: Material(
+        color: cs.primary,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: () => context.go('/profile'),
+          child: SizedBox(
+            width: 52,
+            height: 52,
+            child: Center(
+              child: Text(
+                initial,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  color: cs.onPrimary,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -313,7 +326,7 @@ class _ExerciseCarouselState extends State<_ExerciseCarousel> {
 }
 
 /// Per-exercise hero photo + framing controls. Edit one entry to retune just
-/// that card; missing entries fall back to the emoji-gradient placeholder.
+/// that card; missing entries fall back to the icon-gradient placeholder.
 ///
 /// - [alignment]   which part of the photo stays visible under BoxFit.cover
 ///                 (x, y) range −1 to +1; (0, +0.35) bias toward the bottom.
@@ -370,11 +383,7 @@ class _ExerciseCard extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              _CardBackground(
-                config: image,
-                fallbackEmoji: exercise.emoji,
-                isDark: isDark,
-              ),
+              _CardBackground(config: image, isDark: isDark),
               // Foreground gradient — darkens the bottom so the kcal stat
               // and description stay readable over any photo.
               const DecoratedBox(
@@ -418,9 +427,10 @@ class _ExerciseCard extends StatelessWidget {
                             color: cs.primary,
                             shape: BoxShape.circle,
                           ),
-                          child: const Text(
-                            '🔥',
-                            style: TextStyle(fontSize: 18),
+                          child: Icon(
+                            Icons.local_fire_department_rounded,
+                            size: 20,
+                            color: cs.onPrimary,
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -462,21 +472,16 @@ class _ExerciseCard extends StatelessWidget {
 }
 
 /// Card background: real photo (driven by [_CardImageConfig]) if available,
-/// otherwise an emoji-on-gradient placeholder. Either way it fills the parent.
+/// otherwise an icon-on-gradient placeholder. Either way it fills the parent.
 class _CardBackground extends StatelessWidget {
-  const _CardBackground({
-    required this.config,
-    required this.fallbackEmoji,
-    required this.isDark,
-  });
+  const _CardBackground({required this.config, required this.isDark});
 
   final _CardImageConfig? config;
-  final String fallbackEmoji;
   final bool isDark;
 
   @override
   Widget build(BuildContext context) {
-    final fallback = _FallbackBackground(emoji: fallbackEmoji, isDark: isDark);
+    final fallback = _FallbackBackground(isDark: isDark);
     final cfg = config;
     if (cfg == null) return fallback;
     return Transform.scale(
@@ -493,9 +498,8 @@ class _CardBackground extends StatelessWidget {
 }
 
 class _FallbackBackground extends StatelessWidget {
-  const _FallbackBackground({required this.emoji, required this.isDark});
+  const _FallbackBackground({required this.isDark});
 
-  final String emoji;
   final bool isDark;
 
   @override
@@ -516,7 +520,13 @@ class _FallbackBackground extends StatelessWidget {
           Positioned(
             right: -10,
             bottom: -10,
-            child: Text(emoji, style: const TextStyle(fontSize: 180)),
+            child: Icon(
+              Icons.fitness_center_rounded,
+              size: 160,
+              color: (isDark ? Colors.white : Colors.black).withValues(
+                alpha: 0.12,
+              ),
+            ),
           ),
         ],
       ),
@@ -712,7 +722,11 @@ class _StatRow extends StatelessWidget {
 }
 
 class _RingPainter extends CustomPainter {
-  _RingPainter({required this.progress, required this.track, required this.arc});
+  _RingPainter({
+    required this.progress,
+    required this.track,
+    required this.arc,
+  });
 
   /// 0–1.
   final double progress;

@@ -207,7 +207,8 @@ class _KpiGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = stats;
-    String dash(Object? v, [String suffix = '']) => v == null ? '–' : '$v$suffix';
+    String dash(Object? v, [String suffix = '']) =>
+        v == null ? '–' : '$v$suffix';
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -399,9 +400,11 @@ class _MuscleSheet extends StatelessWidget {
       lastLabel = 'Never';
     } else {
       final now = DateTime.now();
-      final days = DateTime(now.year, now.month, now.day)
-          .difference(DateTime(last.year, last.month, last.day))
-          .inDays;
+      final days = DateTime(
+        now.year,
+        now.month,
+        now.day,
+      ).difference(DateTime(last.year, last.month, last.day)).inDays;
       lastLabel = switch (days) {
         0 => 'Today',
         1 => 'Yesterday',
@@ -464,7 +467,6 @@ class _MuscleSheet extends StatelessWidget {
                 children: [
                   for (final e in stat.trainedBy)
                     ActionChip(
-                      avatar: Text(e.emoji),
                       label: Text(e.name),
                       onPressed: () {
                         context.pop();

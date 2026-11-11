@@ -38,7 +38,7 @@ List<SessionRecord> sessionsOn(List<SessionRecord> records, DateTime day) => [
 ];
 
 /// The plan's `SessionCard` nodes dated on [day]. Plan dates carry no year,
-/// so they are resolved against [now] (see [parsePlanDate]).
+/// so they are resolved against [now] (see [cardDate]).
 List<Map<String, dynamic>> planCardsOn(
   Map<String, dynamic> plan,
   DateTime day,
@@ -48,8 +48,19 @@ List<Map<String, dynamic>> planCardsOn(
   if (sessions is! List) return const [];
   return [
     for (final s in sessions.whereType<Map<String, dynamic>>())
-      if (s['date'] is String && parsePlanDate(s['date'], now) == _day(day)) s,
+      if (cardDate(s, now) == _day(day)) s,
   ];
+}
+
+/// Date → is it a rest day, for the calendar. When a date has a rest card
+/// and a workout card (e.g. a skipped workout plus one the user added), the
+/// workout wins.
+Map<DateTime, bool> plannedRestByDay(List<PlanDay> days) {
+  final out = <DateTime, bool>{};
+  for (final d in days) {
+    out[d.date] = (out[d.date] ?? true) && d.isRest;
+  }
+  return out;
 }
 
 /// First [count] sentences of [text]. Older plans have 3-sentence coach notes;

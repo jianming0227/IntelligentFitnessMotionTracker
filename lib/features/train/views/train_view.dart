@@ -135,10 +135,9 @@ class _CourseRow extends StatelessWidget {
                           imagePath,
                           fit: BoxFit.cover,
                           alignment: const Alignment(0, -0.1),
-                          errorBuilder: (_, _, _) =>
-                              _ThumbFallback(emoji: exercise.emoji),
+                          errorBuilder: (_, _, _) => const _ThumbFallback(),
                         )
-                      : _ThumbFallback(emoji: exercise.emoji),
+                      : const _ThumbFallback(),
                 ),
               ),
             ],
@@ -150,8 +149,7 @@ class _CourseRow extends StatelessWidget {
 }
 
 class _ThumbFallback extends StatelessWidget {
-  const _ThumbFallback({required this.emoji});
-  final String emoji;
+  const _ThumbFallback();
 
   @override
   Widget build(BuildContext context) {
@@ -159,7 +157,11 @@ class _ThumbFallback extends StatelessWidget {
     return Container(
       color: cs.surfaceContainerHighest,
       alignment: Alignment.center,
-      child: Text(emoji, style: const TextStyle(fontSize: 48)),
+      child: Icon(
+        Icons.fitness_center_rounded,
+        size: 40,
+        color: cs.onSurface.withValues(alpha: 0.35),
+      ),
     );
   }
 }

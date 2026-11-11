@@ -1,16 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/utils/friendly_error.dart';
 import '../../profile/models/user_profile_biometrics.dart';
 import '../../profile/providers/profile_providers.dart';
-import '../../progress/logic/mascot_mood.dart';
 import '../../progress/providers/progress_providers.dart';
 import '../controllers/plan_controller.dart';
 import '../widgets/dynamic_ui_parser.dart';
 
 /// FR-3.2: Dedicated Plan tab — renders the server-driven adaptive plan.
-/// The refresh FAB re-runs the full Gemini generation flow using the stored
+/// Pull-to-refresh re-runs the full Gemini generation flow using the stored
 /// session history and current biometric profile.
 class PlanScreen extends ConsumerWidget {
   const PlanScreen({super.key});
@@ -18,10 +19,9 @@ class PlanScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final planAsync = ref.watch(planProvider);
-    final isLoading = planAsync.isLoading;
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
-    // Calendar rings, month stats and Flick's mood come from session history.
+    // Calendar rings and month stats come from session history.
     final records = ref.watch(sessionHistoryProvider).value ?? const [];
     final weightKg =
         (ref.watch(profileProvider).value ?? UserProfileBiometrics.defaults)
@@ -34,47 +34,7 @@ class PlanScreen extends ConsumerWidget {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-              child: Row(
-                children: [
-                  Text('Schedule', style: tt.titleLarge),
-                  const Spacer(),
-                  if (planAsync.value != null) ...[
-                    // Refresh lives here so it stays visible while the
-                    // calendar scrolls.
-                    SizedBox(
-                      width: 40,
-                      height: 40,
-                      child: isLoading
-                          ? Padding(
-                              padding: const EdgeInsets.all(10),
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: cs.primary,
-                              ),
-                            )
-                          : IconButton(
-                              icon: Icon(
-                                Icons.refresh_rounded,
-                                color: cs.primary,
-                                size: 22,
-                              ),
-                              tooltip: 'Refresh plan',
-                              onPressed: () => _refresh(ref),
-                            ),
-                    ),
-                    if (!isLoading)
-                      IconButton(
-                        icon: Icon(
-                          Icons.delete_outline_rounded,
-                          color: cs.error,
-                          size: 22,
-                        ),
-                        tooltip: 'Delete plan',
-                        onPressed: () => _confirmDelete(context, ref),
-                      ),
-                  ],
-                ],
-              ),
+              child: Row(children: [Text('Schedule', style: tt.titleLarge)]),
             ),
             Expanded(
               //1. User clicked on the Generate Plan Button
@@ -82,18 +42,39 @@ class PlanScreen extends ConsumerWidget {
                 loading: () => _LoadingView(),
                 error: (err, _) =>
                     _ErrorView(error: err, onRetry: () => _refresh(ref)),
-                data: (json) => json == null || json.isEmpty   
-                /// 7. Receive the decoded json and pass to parser to call buildDynamicWidget
+                data: (json) => json == null || json.isEmpty
+                    /// 7. Receive the decoded json and pass to parser to call buildDynamicWidget
                     ? _EmptyView(onGenerate: () => _refresh(ref))
-                    : buildDynamicWidget(
-                        json,
-                        context,
-                        records: records,
-                        weightKg: weightKg,
-                        mood: mascotMoodFor(
-                          plan: json,
-                          sessionDates: records.map((r) => r.date).nonNulls,
-                          now: DateTime.now(),
+                    // Pull down to fill empty days. Returns at once: the
+                    // loading view takes over while Gemini works.
+                    : RefreshIndicator(
+                        color: cs.primary,
+                        onRefresh: () async {
+                          final messenger = ScaffoldMessenger.of(context);
+                          unawaited(
+                            _refresh(ref).then((r) {
+                              if (r != PlanUpdate.upToDate) return;
+                              messenger
+                                ..hideCurrentSnackBar()
+                                ..showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Plan is up to date: the next 3 days '
+                                      'are planned.',
+                                    ),
+                                  ),
+                                );
+                            }),
+                          );
+                        },
+                        child: buildDynamicWidget(
+                          json,
+                          context,
+                          records: records,
+                          weightKg: weightKg,
+                          onPlanChanged: ref
+                              .read(planProvider.notifier)
+                              .saveEditedPlan,
                         ),
                       ),
               ),
@@ -105,35 +86,10 @@ class PlanScreen extends ConsumerWidget {
   }
 
   //2. Trigger the plan provider to listen and call refreshPlan together with the biometric profile
-  void _refresh(WidgetRef ref) {
+  Future<PlanUpdate> _refresh(WidgetRef ref) {
     final biometrics =
         ref.read(profileProvider).value ?? UserProfileBiometrics.defaults;
-    ref.read(planProvider.notifier).refreshPlan(biometrics: biometrics);
-  }
-
-  Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Delete Plan'),
-        content: const Text(
-          'This removes your current plan from all devices. Complete a session to generate a new one.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true) {
-      ref.read(planProvider.notifier).clearPlan();
-    }
+    return ref.read(planProvider.notifier).refreshPlan(biometrics: biometrics);
   }
 }
 

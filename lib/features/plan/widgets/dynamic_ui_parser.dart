@@ -3,33 +3,39 @@ import 'package:go_router/go_router.dart';
 
 import '../../progress/logic/mascot_mood.dart';
 import '../../progress/models/session_record.dart';
-import '../../progress/widgets/mascot/flick_mascot.dart';
-import '../../train/data/exercise_images.dart';
-import '../../train/models/exercise.dart';
+import '../../train/views/camera_view.dart';
+import '../logic/plan_edits.dart';
 import '../logic/schedule_logic.dart';
+import 'plan_day_card.dart';
 
 /// Decodes a Gemini-generated JSON map into native Flutter widgets.
 /// Supports two node types: WorkoutPlanView (top-level) and SessionCard.
 ///
-/// [records], [weightKg] and [mood] are app data shown around the plan
-/// (calendar rings, month stats, Flick's mood); the JSON format is unchanged.
+/// [records] and [weightKg] are app data shown around the plan (calendar
+/// rings, month stats). [onPlanChanged] receives the whole plan after a user
+/// edit; without it the plan is read-only.
 Widget buildDynamicWidget(
   Map<String, dynamic> jsonNode,
   BuildContext context, {
   List<SessionRecord> records = const [],
   double weightKg = 70,
-  MascotMood mood = MascotMood.idle,
+  ValueChanged<Map<String, dynamic>>? onPlanChanged,
 }) {
   //8. Change the json map into widgets
   //Checked the type of json node (Gemini Prompt output json schema)
   return switch (jsonNode['type'] as String? ?? '') {
     'WorkoutPlanView' => _WorkoutPlanView(
-        node: jsonNode,
-        records: records,
-        weightKg: weightKg,
-        mood: mood,
-      ),
-    'SessionCard' => _DayPlanCard(node: jsonNode),
+      node: jsonNode,
+      records: records,
+      weightKg: weightKg,
+      onChanged: onPlanChanged,
+    ),
+    'SessionCard' => PlanDayCard(
+      card: jsonNode,
+      status: PlanCardStatus.upcoming,
+      onTap: () {},
+      onAction: (_) {},
+    ),
     _ => const SizedBox.shrink(),
   };
 }
@@ -41,20 +47,20 @@ const _monthNames = [
 
 DateTime _dayOf(DateTime d) => DateTime(d.year, d.month, d.day);
 
-// ── WorkoutPlanView: stats → calendar → daily plan → Flick ──────────────────
+// ── WorkoutPlanView: stats → calendar → daily plan → why this plan ─────────
 
 class _WorkoutPlanView extends StatefulWidget {
   const _WorkoutPlanView({
     required this.node,
     required this.records,
     required this.weightKg,
-    required this.mood,
+    required this.onChanged,
   });
 
   final Map<String, dynamic> node;
   final List<SessionRecord> records;
   final double weightKg;
-  final MascotMood mood;
+  final ValueChanged<Map<String, dynamic>>? onChanged;
 
   @override
   State<_WorkoutPlanView> createState() => _WorkoutPlanViewState();
@@ -80,20 +86,119 @@ class _WorkoutPlanViewState extends State<_WorkoutPlanView> {
     _month = DateTime(day.year, day.month);
   });
 
+  bool get _editable => widget.onChanged != null;
+
+  void _save(Map<String, dynamic> plan) => widget.onChanged?.call(plan);
+
+  /// A4: done / missed / skipped for a card on the selected day.
+  PlanCardStatus _statusOf(
+    Map<String, dynamic> card,
+    List<SessionRecord> doneToday,
+    DateTime today,
+  ) {
+    if (card['skipped'] == true) return PlanCardStatus.skipped;
+    if (card['done'] == true) return PlanCardStatus.done;
+    final target = exerciseForActionId(card['actionId'] as String?);
+    if (isRestSession(card)) {
+      return PlanCardStatus.upcoming; // AI rest / recovery card
+    }
+    if (target != null &&
+        doneToday.any(
+          (r) => r.exerciseName.toLowerCase() == target.name.toLowerCase(),
+        )) {
+      return PlanCardStatus.done;
+    }
+    return _selected.isBefore(today)
+        ? PlanCardStatus.missed
+        : PlanCardStatus.upcoming;
+  }
+
+  Future<void> _openDetails(PlanEntry entry, PlanCardStatus status) async {
+    if (!_editable) return;
+    final action = await showPlanDetailSheet(
+      context,
+      card: entry.card,
+      status: status,
+    );
+    if (action != null && mounted) await _handle(entry, action);
+  }
+
+  Future<void> _handle(PlanEntry entry, PlanCardAction action) async {
+    final plan = widget.node;
+    final card = entry.card;
+    switch (action) {
+      case PlanCardAction.play:
+        final target = exerciseForActionId(card['actionId'] as String?);
+        if (target != null) {
+          // The card id links the finished workout back to this card.
+          context.push(
+            '/train/camera',
+            extra: CameraLaunch(target, planSessionId: card['id'] as String?),
+          );
+        }
+      case PlanCardAction.toggleDone:
+        _save(setDone(plan, entry.index, card['done'] != true));
+      case PlanCardAction.toggleSkip:
+        _save(setSkipped(plan, entry.index, card['skipped'] != true));
+      case PlanCardAction.delete:
+        _delete(entry);
+      case PlanCardAction.edit:
+        final edit = await showPlanEditSheet(
+          context,
+          card: card,
+          date: _selected,
+        );
+        if (edit == null || !mounted) return;
+        _save(editSession(plan, entry.index, edit));
+        _select(DateTime(edit.date.year, edit.date.month, edit.date.day));
+    }
+  }
+
+  /// Removes a card, with an Undo that puts the old plan back.
+  void _delete(PlanEntry entry) {
+    final before = widget.node;
+    _save(removeSession(before, entry.index));
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('${entry.card['exercise'] ?? 'Workout'} removed'),
+          action: SnackBarAction(label: 'Undo', onPressed: () => _save(before)),
+        ),
+      );
+  }
+
+  Future<void> _add() async {
+    final edit = await showPlanEditSheet(context, date: _selected);
+    if (edit == null || !mounted) return;
+    _save(addSession(widget.node, edit));
+    _select(DateTime(edit.date.year, edit.date.month, edit.date.day));
+  }
+
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
+    final today = _dayOf(now);
     final node = widget.node;
-    final title = node['title'] as String? ?? 'Your Adaptive Plan';
-    final coachNote = firstSentences(node['coachNote'] as String? ?? '');
+    // One sentence: older plans have 2-3 sentence notes.
+    final coachNote = firstSentences(
+      node['coachNote'] as String? ?? '',
+      count: 1,
+    );
     final stats = monthStats(widget.records, _month, widget.weightKg);
-    final planned = {
-      for (final d in planDays(node, now)) d.date: d.isRest,
+    final days = planDays(node, now);
+    final planned = plannedRestByDay(days);
+    final trained = {
+      ...trainedDays(widget.records),
+      for (final d in days)
+        if (d.done) d.date,
     };
-    final cards = planCardsOn(node, _selected, now);
+    final entries = planEntriesOn(node, _selected, now);
     final done = sessionsOn(widget.records, _selected);
 
     return ListView(
+      // Always scrollable so pull-to-refresh works on a short day.
+      physics: const AlwaysScrollableScrollPhysics(),
       // Bottom padding clears the floating nav bar.
       padding: const EdgeInsets.fromLTRB(20, 4, 20, 120),
       children: [
@@ -110,7 +215,8 @@ class _WorkoutPlanViewState extends State<_WorkoutPlanView> {
             Expanded(
               child: _StatCard(
                 label: 'Days completed',
-                value: '${stats.daysCompleted} '
+                value:
+                    '${stats.daysCompleted} '
                     '${stats.daysCompleted == 1 ? 'day' : 'days'}',
                 icon: Icons.check_circle_outline_rounded,
               ),
@@ -121,27 +227,60 @@ class _WorkoutPlanViewState extends State<_WorkoutPlanView> {
         _Calendar(
           month: _month,
           selected: _selected,
-          today: _dayOf(now),
-          trained: trainedDays(widget.records),
+          today: today,
+          trained: trained,
           planned: planned,
           onPrev: () => _shiftMonth(-1),
           onNext: () => _shiftMonth(1),
           onSelect: _select,
         ),
         const SizedBox(height: 24),
-        _DailyPlanTitle(day: _selected),
+        _DailyPlanTitle(day: _selected, onAdd: _editable ? _add : null),
         const SizedBox(height: 12),
-        for (final c in cards) ...[
-          _DayPlanCard(node: c),
+        for (final e in entries) ...[
+          Builder(
+            builder: (context) {
+              final status = _statusOf(e.card, done, today);
+              final card = PlanDayCard(
+                card: e.card,
+                status: status,
+                onTap: () => _openDetails(e, status),
+                onAction: (a) => _handle(e, a),
+              );
+              if (!_editable) return card;
+              // Swipe left to delete (Undo in the snackbar).
+              return Dismissible(
+                key: ValueKey(
+                  '${e.index}|${e.card['date']}|${e.card['exercise']}',
+                ),
+                direction: DismissDirection.endToStart,
+                background: Container(
+                  alignment: Alignment.centerRight,
+                  padding: const EdgeInsets.only(right: 24),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.error,
+                    borderRadius: BorderRadius.circular(22),
+                  ),
+                  child: const Icon(
+                    Icons.delete_outline_rounded,
+                    color: Colors.white,
+                  ),
+                ),
+                onDismissed: (_) => _delete(e),
+                child: card,
+              );
+            },
+          ),
           const SizedBox(height: 12),
         ],
         for (final r in done) ...[
           _DoneRow(record: r),
           const SizedBox(height: 10),
         ],
-        if (cards.isEmpty && done.isEmpty) const _EmptyDay(),
+        if (entries.isEmpty && done.isEmpty)
+          _EmptyDay(onAdd: _editable ? _add : null),
         const SizedBox(height: 22),
-        _FlickSays(mood: widget.mood, title: title, text: coachNote),
+        _WhyThisPlan(text: coachNote),
       ],
     );
   }
@@ -150,7 +289,11 @@ class _WorkoutPlanViewState extends State<_WorkoutPlanView> {
 // ── Stat cards ───────────────────────────────────────────────────────────────
 
 class _StatCard extends StatelessWidget {
-  const _StatCard({required this.label, required this.value, required this.icon});
+  const _StatCard({
+    required this.label,
+    required this.value,
+    required this.icon,
+  });
 
   final String label;
   final String value;
@@ -265,7 +408,15 @@ class _Calendar extends StatelessWidget {
         const SizedBox(height: 6),
         Row(
           children: [
-            for (final d in const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'])
+            for (final d in const [
+              'Mon',
+              'Tue',
+              'Wed',
+              'Thu',
+              'Fri',
+              'Sat',
+              'Sun',
+            ])
               Expanded(
                 child: Center(
                   child: Text(d, style: tt.bodySmall?.copyWith(color: muted)),
@@ -400,9 +551,9 @@ class _CalendarLegend extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final style = Theme.of(context).textTheme.bodySmall?.copyWith(
-      color: cs.onSurface.withValues(alpha: 0.6),
-    );
+    final style = Theme.of(
+      context,
+    ).textTheme.bodySmall?.copyWith(color: cs.onSurface.withValues(alpha: 0.6));
     Widget ring(Color c) => Container(
       width: 12,
       height: 12,
@@ -413,7 +564,11 @@ class _CalendarLegend extends StatelessWidget {
     );
     Widget item(Widget mark, String label) => Row(
       mainAxisSize: MainAxisSize.min,
-      children: [mark, const SizedBox(width: 6), Text(label, style: style)],
+      children: [
+        mark,
+        const SizedBox(width: 6),
+        Text(label, style: style),
+      ],
     );
     return Wrap(
       spacing: 16,
@@ -441,137 +596,39 @@ class _CalendarLegend extends StatelessWidget {
 // ── Daily plan ───────────────────────────────────────────────────────────────
 
 class _DailyPlanTitle extends StatelessWidget {
-  const _DailyPlanTitle({required this.day});
+  const _DailyPlanTitle({required this.day, required this.onAdd});
 
   final DateTime day;
+  final VoidCallback? onAdd;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
-    return Text.rich(
-      TextSpan(
-        style: tt.titleLarge,
-        children: [
-          const TextSpan(text: 'Daily plan: '),
-          TextSpan(
-            text: '${_monthNames[day.month - 1]} ${day.day}',
-            style: TextStyle(color: cs.primary),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// One plan `SessionCard`: details on the left, photo on the right, Play
-/// below. Cards without a start action (rest / active recovery) get no Play.
-class _DayPlanCard extends StatelessWidget {
-  const _DayPlanCard({required this.node});
-
-  final Map<String, dynamic> node;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final tt = Theme.of(context).textTheme;
-    final muted = cs.onSurface.withValues(alpha: 0.6);
-
-    final day = node['day'] as String? ?? '';
-    final time = node['time'] as String? ?? '';
-    final exercise = node['exercise'] as String? ?? '';
-    final volume = node['volume'] as String? ?? '';
-    final intensity = node['intensity'] as String? ?? '';
-    final target = _exerciseFromActionId(node['actionId'] as String?);
-    final imagePath = target != null ? exerciseImageFor(target.id) : null;
-    final placeholder = Center(
-      child: Icon(
-        target == null ? Icons.self_improvement_rounded : Icons.fitness_center,
-        color: cs.primary,
-        size: 30,
-      ),
-    );
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(22),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      [day, time].where((s) => s.isNotEmpty).join(' · '),
-                      style: tt.bodySmall?.copyWith(color: muted),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      exercise,
-                      style: tt.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    if (volume.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(volume, style: tt.bodyMedium),
-                    ],
-                    if (intensity.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        intensity,
-                        style: tt.bodySmall?.copyWith(color: muted),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ],
+    return Row(
+      children: [
+        Expanded(
+          child: Text.rich(
+            TextSpan(
+              style: tt.titleLarge,
+              children: [
+                const TextSpan(text: 'Daily plan: '),
+                TextSpan(
+                  text: '${_monthNames[day.month - 1]} ${day.day}',
+                  style: TextStyle(color: cs.primary),
                 ),
-              ),
-              const SizedBox(width: 12),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: Container(
-                  width: 104,
-                  height: 88,
-                  color: cs.onSurface.withValues(alpha: 0.08),
-                  child: imagePath == null
-                      ? placeholder
-                      : Image.asset(
-                          imagePath,
-                          fit: BoxFit.cover,
-                          alignment: const Alignment(0, -0.2),
-                          errorBuilder: (_, _, _) => placeholder,
-                        ),
-                ),
-              ),
-            ],
-          ),
-          if (target != null) ...[
-            const SizedBox(height: 14),
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: cs.primary,
-                foregroundColor: cs.onPrimary,
-                minimumSize: const Size.fromHeight(48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(24),
-                ),
-              ),
-              icon: const Icon(Icons.play_circle_outline_rounded, size: 22),
-              label: const Text('Play'),
-              onPressed: () => context.push('/train/camera', extra: target),
+              ],
             ),
-          ],
-        ],
-      ),
+          ),
+        ),
+        if (onAdd != null)
+          TextButton.icon(
+            style: TextButton.styleFrom(foregroundColor: cs.primary),
+            icon: const Icon(Icons.add_rounded, size: 20),
+            label: const Text('Add'),
+            onPressed: onAdd,
+          ),
+      ],
     );
   }
 }
@@ -615,7 +672,9 @@ class _DoneRow extends StatelessWidget {
 }
 
 class _EmptyDay extends StatelessWidget {
-  const _EmptyDay();
+  const _EmptyDay({required this.onAdd});
+
+  final VoidCallback? onAdd;
 
   @override
   Widget build(BuildContext context) {
@@ -626,24 +685,35 @@ class _EmptyDay extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: cs.onSurface.withValues(alpha: 0.12)),
       ),
-      child: Text(
-        'Nothing planned for this day.',
-        textAlign: TextAlign.center,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-          color: cs.onSurface.withValues(alpha: 0.6),
-        ),
+      child: Column(
+        children: [
+          Text(
+            'Nothing planned for this day.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: cs.onSurface.withValues(alpha: 0.6),
+            ),
+          ),
+          if (onAdd != null) ...[
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Add a workout'),
+              onPressed: onAdd,
+            ),
+          ],
+        ],
       ),
     );
   }
 }
 
-// ── Flick + speech bubble ────────────────────────────────────────────────────
+// ── Why this plan ────────────────────────────────────────────────────────────
 
-class _FlickSays extends StatelessWidget {
-  const _FlickSays({required this.mood, required this.title, required this.text});
+/// The coach note, kept to one short reason for this plan.
+class _WhyThisPlan extends StatelessWidget {
+  const _WhyThisPlan({required this.text});
 
-  final MascotMood mood;
-  final String title;
   final String text;
 
   @override
@@ -651,74 +721,35 @@ class _FlickSays extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
     if (text.isEmpty) return const SizedBox.shrink();
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        FlickMascot(mood: mood, size: 92),
-        Expanded(
-          child: CustomPaint(
-            painter: _BubbleTail(color: cs.surface),
-            child: Container(
-              margin: const EdgeInsets.only(left: 10, bottom: 18),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: cs.surface,
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: tt.labelMedium?.copyWith(
-                      color: cs.primary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.lightbulb_outline_rounded, size: 20, color: cs.primary),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Why this plan',
+                  style: tt.labelMedium?.copyWith(
+                    color: cs.primary,
+                    fontWeight: FontWeight.w700,
                   ),
-                  const SizedBox(height: 6),
-                  Text(text, style: tt.bodyMedium?.copyWith(height: 1.4)),
-                ],
-              ),
+                ),
+                const SizedBox(height: 4),
+                Text(text, style: tt.bodyMedium?.copyWith(height: 1.4)),
+              ],
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
-}
-
-/// Small triangle on the bubble's lower-left edge pointing at Flick.
-class _BubbleTail extends CustomPainter {
-  _BubbleTail({required this.color});
-
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final y = size.height - 34;
-    canvas.drawPath(
-      Path()
-        ..moveTo(12, y - 8)
-        ..lineTo(0, y + 6)
-        ..lineTo(16, y + 6)
-        ..close(),
-      Paint()..color = color,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_BubbleTail old) => old.color != color;
-}
-
-/// Maps the Gemini-generated actionId to the local Exercise object so GoRouter
-/// can hand a typed instance to CameraView.
-Exercise? _exerciseFromActionId(String? actionId) {
-  return switch (actionId) {
-    'start_squat' => Exercise.all.firstWhere((e) => e.id == 'squat'),
-    'start_bicep_curl' =>
-      Exercise.all.firstWhere((e) => e.id == 'bicep_curl'),
-    _ => null,
-  };
 }
