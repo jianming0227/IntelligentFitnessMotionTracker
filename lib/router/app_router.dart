@@ -9,6 +9,7 @@ import '../core/providers/demo_mode_provider.dart';
 import '../core/utils/app_log.dart';
 import '../features/auth/views/login_view.dart';
 import '../features/auth/views/register_view.dart';
+import '../features/community/views/community_view.dart';
 import '../features/home/views/home_view.dart';
 import '../features/plan/views/plan_screen.dart';
 import '../features/profile/views/biometric_survey_view.dart';
@@ -73,6 +74,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       // Full-screen routes — no bottom nav
       GoRoute(path: '/survey', builder: (_, _) => const BiometricSurveyView()),
+      GoRoute(path: '/community', builder: (_, _) => const CommunityView()),
       GoRoute(
         path: '/train/detail',
         builder: (context, state) =>

@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/utils/friendly_error.dart';
+import '../../community/providers/community_providers.dart';
+import '../../community/widgets/community_preview_card.dart';
 import '../../profile/models/user_profile_biometrics.dart';
 import '../../profile/providers/profile_providers.dart';
 import '../logic/muscle_status.dart';
@@ -36,7 +38,10 @@ class ProgressView extends ConsumerWidget {
     return Scaffold(
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: () => ref.refresh(sessionHistoryProvider.future),
+          onRefresh: () {
+            ref.invalidate(feedProvider); // Community card reloads too
+            return ref.refresh(sessionHistoryProvider.future);
+          },
           child: ListView(
             // Bottom padding clears the floating nav bar (AppShell extendBody).
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 120),
@@ -47,6 +52,8 @@ class ProgressView extends ConsumerWidget {
               // brand-new account still sees the mascot and zeroed tiles.
               const _SectionLabel('This week'),
               MascotCard(kpis: _KpiGrid(stats: week)),
+              const SizedBox(height: 20),
+              const CommunityPreviewCard(),
               const SizedBox(height: 20),
               ...history.when(
                 loading: () => const [

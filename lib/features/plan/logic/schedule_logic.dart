@@ -37,21 +37,6 @@ List<SessionRecord> sessionsOn(List<SessionRecord> records, DateTime day) => [
     if (r.date != null && _day(r.date!) == _day(day) && r.sets.isNotEmpty) r,
 ];
 
-/// The plan's `SessionCard` nodes dated on [day]. Plan dates carry no year,
-/// so they are resolved against [now] (see [cardDate]).
-List<Map<String, dynamic>> planCardsOn(
-  Map<String, dynamic> plan,
-  DateTime day,
-  DateTime now,
-) {
-  final sessions = plan['sessions'];
-  if (sessions is! List) return const [];
-  return [
-    for (final s in sessions.whereType<Map<String, dynamic>>())
-      if (cardDate(s, now) == _day(day)) s,
-  ];
-}
-
 /// Date → is it a rest day, for the calendar. When a date has a rest card
 /// and a workout card (e.g. a skipped workout plus one the user added), the
 /// workout wins.

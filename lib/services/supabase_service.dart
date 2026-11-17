@@ -160,11 +160,6 @@ class SupabaseService {
     }
   }
 
-  Future<void> deletePlan() async {
-    final userId = currentUser?.id;
-    if (userId == null) return;
-    await _client.from('plans').delete().eq('user_id', userId);
-  }
 
   Future<Map<String, dynamic>?> fetchProfile() async {
     final userId = currentUser?.id;

@@ -4,7 +4,10 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/providers/theme_mode_provider.dart';
 import '../../../core/utils/display_name.dart';
+import '../../../core/utils/friendly_error.dart';
 import '../../auth/providers/auth_providers.dart';
+import '../../community/providers/community_providers.dart';
+import '../../community/widgets/community_common.dart';
 import '../models/user_profile_biometrics.dart';
 import '../providers/profile_providers.dart';
 
@@ -17,7 +20,9 @@ class ProfileView extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final profileAsync = ref.watch(profileProvider);
     final email = ref.watch(supabaseServiceProvider).currentUser?.email;
-    final name = displayNameFromEmail(email);
+    final online = ref.watch(isOnlineUserProvider);
+    final displayName = ref.watch(displayNameProvider).value;
+    final name = displayName ?? displayNameFromEmail(email);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final tt = Theme.of(context).textTheme;
 
@@ -59,6 +64,16 @@ class ProfileView extends ConsumerWidget {
                   ],
 
                   const SizedBox(height: 32),
+                  if (online)
+                    _MenuTile(
+                      icon: Icons.badge_outlined,
+                      label: 'Display name',
+                      trailing: _TrailingValue(
+                        displayName ?? 'Not set',
+                        muted: displayName == null,
+                      ),
+                      onTap: () => _editDisplayName(context, ref, name),
+                    ),
                   _MenuTile(
                     icon: Icons.tune_rounded,
                     label: 'Edit biometrics',
@@ -97,6 +112,46 @@ class ProfileView extends ConsumerWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Name shown on community posts (`profiles.full_name`).
+Future<void> _editDisplayName(
+  BuildContext context,
+  WidgetRef ref,
+  String current,
+) async {
+  final messenger = ScaffoldMessenger.of(context);
+  final name = await askDisplayName(context, initial: current);
+  if (name == null) return;
+  try {
+    await ref.read(displayNameProvider.notifier).save(name);
+    messenger.showSnackBar(const SnackBar(content: Text('Display name saved')));
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text(friendlyError(e))));
+  }
+}
+
+/// Current value on the right of a menu tile, cut short when long.
+class _TrailingValue extends StatelessWidget {
+  const _TrailingValue(this.text, {this.muted = false});
+  final String text;
+  final bool muted;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 140),
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: cs.onSurface.withValues(alpha: muted ? 0.45 : 0.75),
+        ),
       ),
     );
   }

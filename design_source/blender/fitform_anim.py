@@ -1,6 +1,6 @@
-"""Builds both exercise clips with a muscle-highlight intro pause."""
+"""Builds the exercise clips with a muscle-highlight intro pause."""
 import bpy, sys, importlib
-import fitform_pose as fp, fitform_squat as fs, fitform_bicep as fb
+import fitform_pose as fp, fitform_squat as fs, fitform_bicep as fb, fitform_moves as fm
 
 FPS = 30
 INTRO = (0.15, 1.1, 0.15)     # glow switch-on, hold, switch-off while standing still (short switches: no streaks)
@@ -24,9 +24,19 @@ def build(exercise):
         shape = {("FitForm_Human", "BicepFlex"): lambda f, c: c,
                  ("BicepGlow", "Flex"): lambda f, c: c,
                  ("BicepGlow", "Glow"): lambda f, c: intro[f] if f < n0 else fb.glow_value(c)}
-    else:
+    elif exercise == "squat":
         rep = timeline([(1.8, 0, 1), (0.8, 1, 1), (1.8, 1, 0)]); action_name, pose = "Squat", fs.squat_pose
         shape = {("LegGlow", "Glow"): lambda f, c: intro[f] if f < n0 else fb.glow_value(c)}
+    elif exercise == "lunge":
+        rep = timeline([(1.8, 0, 1), (0.6, 1, 1), (1.8, 1, 0)]); action_name, pose = "Lunge", fm.lunge_pose
+        shape = {("LegGlow", "Glow"): lambda f, c: intro[f] if f < n0 else fb.glow_value(c)}
+    elif exercise in ("shoulder_press", "lateral_raise"):
+        rep = timeline([(1.4, 0, 1), (0.4, 1, 1), (2.0, 1, 0)])
+        action_name, pose = {"shoulder_press": ("ShoulderPress", fm.press_pose),
+                             "lateral_raise": ("LateralRaise", fm.raise_pose)}[exercise]
+        shape = {("DeltGlow", "Glow"): lambda f, c: intro[f] if f < n0 else fb.glow_value(c)}
+    else:
+        raise ValueError(exercise)
     vals = [0.0] * n0 + rep; N = len(vals)
     rig = fp.rig()
     old = bpy.data.actions.get(action_name)

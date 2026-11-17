@@ -19,7 +19,7 @@ class FitnessApp extends ConsumerWidget {
     // from a previous account never bleeds into a new session. Without this,
     // Riverpod's in-memory cache keeps the old AsyncData alive even after
     // prefs.clear() on sign-out, and ref.listen in HomeView never fires.
-    ref.listen(authStateStreamProvider, (_, __) {
+    ref.listen(authStateStreamProvider, (_, _) {
       ref.invalidate(profileProvider);
       ref.invalidate(planProvider);
     });

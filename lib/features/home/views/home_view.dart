@@ -8,6 +8,8 @@ import '../../../core/constants/app_text_styles.dart';
 import '../../../core/providers/theme_mode_provider.dart';
 import '../../../core/utils/display_name.dart';
 import '../../auth/providers/auth_providers.dart';
+import '../../community/providers/community_providers.dart';
+import '../../community/widgets/community_summary_card.dart';
 import '../../profile/models/user_profile_biometrics.dart';
 import '../../profile/providers/profile_providers.dart';
 import '../../progress/logic/progress_stats.dart';
@@ -34,9 +36,12 @@ class HomeView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final name = displayNameFromEmail(
-      ref.watch(supabaseServiceProvider).currentUser?.email,
-    );
+    // Community display name when set, else the email prefix.
+    final name =
+        ref.watch(displayNameProvider).value ??
+        displayNameFromEmail(
+          ref.watch(supabaseServiceProvider).currentUser?.email,
+        );
 
     // First-time onboarding: when the profile resolves and is null, send the
     // user through the biometric survey. `ref.listen` only fires on state
@@ -106,6 +111,12 @@ class HomeView extends ConsumerWidget {
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: gutter),
               child: _QuickActions(),
+            ),
+            const SizedBox(height: 20),
+            // Social proof below the user's own progress and shortcuts.
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: gutter),
+              child: CommunitySummaryCard(),
             ),
           ],
         ),
@@ -769,39 +780,53 @@ class _ActionTile extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
-  final VoidCallback onTap;
+
+  /// Null = disabled (shown faded).
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
+    // Four tiles share one row: labels scale down instead of overflowing.
     return Expanded(
-      child: Material(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(18),
-        child: InkWell(
+      child: Opacity(
+        opacity: onTap == null ? 0.4 : 1,
+        child: Material(
+          color: cs.surface,
           borderRadius: BorderRadius.circular(18),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 8),
-            child: Column(
-              children: [
-                Icon(icon, color: cs.primary, size: 26),
-                const SizedBox(height: 10),
-                Text(
-                  title,
-                  style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: tt.bodySmall?.copyWith(
-                    color: cs.onSurface.withValues(alpha: 0.55),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 6),
+              child: Column(
+                children: [
+                  Icon(icon, color: cs.primary, size: 24),
+                  const SizedBox(height: 8),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      style: tt.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 2),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      subtitle,
+                      maxLines: 1,
+                      style: tt.bodySmall?.copyWith(
+                        color: cs.onSurface.withValues(alpha: 0.55),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
