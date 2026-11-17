@@ -2,6 +2,7 @@ import 'package:fitnessapp/features/plan/logic/plan_edits.dart';
 import 'package:fitnessapp/features/plan/logic/plan_merge.dart';
 import 'package:fitnessapp/features/plan/logic/plan_sync.dart';
 import 'package:fitnessapp/features/progress/logic/mascot_mood.dart';
+import 'package:fitnessapp/features/train/models/exercise.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Map<String, dynamic> _card(
@@ -170,7 +171,7 @@ void main() {
     expect(_isoDates(merged), ['2026-10-20']);
   });
 
-  test('offline rule fill alternates exercises at the last volume', () {
+  test('offline rule fill rotates through the catalog at the last volume', () {
     final now = DateTime(2026, 11, 13, 9);
     final dates = datesToPlan(nov10Plan, now); // 14, 15, 16
     final merged = mergeGenerated(
@@ -180,10 +181,12 @@ void main() {
       now,
     );
     final added = (merged['sessions'] as List).cast<Map>().skip(3).toList();
+    // Last planned workout was Squat: continue with the catalog entries
+    // after it, in catalog order, wrapping around.
+    final names = Exercise.all.map((e) => e.name).toList();
+    final from = names.indexOf('Squat');
     expect(added.map((c) => c['exercise']), [
-      'Bicep Curl',
-      'Squat',
-      'Bicep Curl',
+      for (var i = 1; i <= 3; i++) names[(from + i) % names.length],
     ]);
     expect(added.first['volume'], '3 sets x 10 reps');
     expect(merged['coachNote'], 'Old note.', reason: 'keeps the AI note');

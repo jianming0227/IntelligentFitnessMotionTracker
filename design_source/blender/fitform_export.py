@@ -50,14 +50,28 @@ def apply_masks(ob):
 
 EXERCISES = {
     # glb name: (rig action, objects left out, shape keys dropped)
-    "bicep_curl": ("BicepCurl", ("LegGlow",), ()),
-    "squat": ("Squat", ("Dumbbell_L", "Dumbbell_R", "BicepGlow"), ("BicepFlex",)),
+    "bicep_curl": ("BicepCurl", ("LegGlow", "DeltGlow"), ()),
+    "squat": ("Squat", ("Dumbbell_L", "Dumbbell_R", "BicepGlow", "DeltGlow"), ("BicepFlex",)),
+    "lunge": ("Lunge", ("Dumbbell_L", "Dumbbell_R", "BicepGlow", "DeltGlow"), ("BicepFlex",)),
+    "shoulder_press": ("ShoulderPress", ("LegGlow", "BicepGlow"), ("BicepFlex",)),
+    "lateral_raise": ("LateralRaise", ("LegGlow", "BicepGlow"), ("BicepFlex",)),
 }
+
+def _use_action(idblock, act):
+    """Point an ID's animation at `act` (and its matching slot, Blender 4.4+ slotted actions)."""
+    ad = idblock.animation_data
+    if ad is None: return
+    ad.action = act                                   # Blender re-picks the slot this key block used before
+    if getattr(ad, "action_slot", True) is None:      # no slot for it in this clip: leave it unanimated
+        ad.action = None
 
 def prepare(exercise):
     action, drop, drop_keys = EXERCISES[exercise]
     rig = bpy.data.objects["FitForm_Rig"]
-    rig.animation_data.action = bpy.data.actions[action]
+    act = bpy.data.actions[action]
+    rig.animation_data.action = act
+    for o in rig.children_recursive:                  # glow/bulge shape keys follow the same clip
+        if o.type == "MESH" and o.data.shape_keys: _use_action(o.data.shape_keys, act)
     for name in drop:
         if name in bpy.data.objects: bpy.data.objects.remove(bpy.data.objects[name], do_unlink=True)
     for o in rig.children_recursive:

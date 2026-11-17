@@ -1,18 +1,22 @@
 """Shared helpers for the FitForm human (MPFB) build steps."""
 import bpy, os
-from bl_ext.user_default.mpfb.services.humanservice import HumanService
-from bl_ext.user_default.mpfb.services.locationservice import LocationService
-from bl_ext.user_default.mpfb.services.objectservice import ObjectService
+try:    # MPFB is only needed to build/dress the human; viewing, posing and snapshots work without it
+    from bl_ext.user_default.mpfb.services.humanservice import HumanService
+    from bl_ext.user_default.mpfb.services.locationservice import LocationService
+    from bl_ext.user_default.mpfb.services.objectservice import ObjectService
+except ImportError:
+    HumanService = LocationService = ObjectService = None
 
 # Microsoft Store Blender redirects AppData to a much longer LocalCache path,
 # which pushes some MakeHuman files past Windows' 260-char limit. The same files
 # are visible at the short path, so point MPFB there.
 _LONG = r"C:\Users\ljmwa\AppData\Local\packages\BlenderFoundation.Blender_ppwjx1n5r4v9t\LocalCache\Roaming"
 _SHORT = r"C:\Users\ljmwa\AppData\Roaming"
-for _k, _v in list(vars(LocationService).items()):
-    if isinstance(_v, str) and _v.lower().startswith(_LONG.lower()):
-        setattr(LocationService, _k, _SHORT + _v[len(_LONG):])
-ASSETS = LocationService.get_user_data()
+if LocationService is not None:
+    for _k, _v in list(vars(LocationService).items()):
+        if isinstance(_v, str) and _v.lower().startswith(_LONG.lower()):
+            setattr(LocationService, _k, _SHORT + _v[len(_LONG):])
+ASSETS = LocationService.get_user_data() if LocationService is not None else None
 OUT = r"C:\Users\ljmwa\Desktop\fitness\design_source"
 
 def asset(*p):
