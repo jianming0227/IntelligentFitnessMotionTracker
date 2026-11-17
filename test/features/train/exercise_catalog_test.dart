@@ -105,10 +105,14 @@ void main() {
       expect(reps('lateral_raise', [80, 20, 60, 20]), 0, reason: 'too low');
     });
 
-    test('no media yet: icon placeholder, no 3D demo', () {
+    test('new exercises have a photo and a 3D demo', () {
       for (final id in ['lunge', 'shoulder_press', 'lateral_raise']) {
-        expect(Exercise.byId(id)!.imageUrl, isNull, reason: id);
-        expect(Exercise.byId(id)!.tutorial, isNull, reason: id);
+        expect(
+          Exercise.byId(id)!.imageUrl,
+          startsWith('assets/images/'),
+          reason: id,
+        );
+        expect(Exercise.byId(id)!.tutorial, isNotNull, reason: id);
       }
     });
   });

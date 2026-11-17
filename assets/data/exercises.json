@@ -101,8 +101,8 @@
     "met": 3.5,
     "primary_muscles": ["quads", "glutes"],
     "secondary_muscles": ["hamstrings", "calves", "core"],
-    "image_url": null,
-    "image_framing": null,
+    "image_url": "assets/images/lunge.jpg",
+    "image_framing": {"alignX": 0, "alignY": 0, "zoom": 1.4, "zoomX": 0, "zoomY": -0.2},
     "tutorial": {
       "model": "assets/models/lunge.glb",
       "poster": "assets/tutorials/lunge_poster.png",
@@ -142,8 +142,8 @@
     "met": 3.5,
     "primary_muscles": ["shoulders"],
     "secondary_muscles": ["triceps"],
-    "image_url": null,
-    "image_framing": null,
+    "image_url": "assets/images/shoulderpress.jpg",
+    "image_framing": {"alignX": 0, "alignY": 0, "zoom": 1.4, "zoomX": 0, "zoomY": -0.5},
     "tutorial": {
       "model": "assets/models/shoulder_press.glb",
       "poster": "assets/tutorials/shoulder_press_poster.png",
@@ -183,8 +183,8 @@
     "met": 3.5,
     "primary_muscles": ["shoulders"],
     "secondary_muscles": ["back"],
-    "image_url": null,
-    "image_framing": null,
+    "image_url": "assets/images/lateralraise.jpg",
+    "image_framing": {"alignX": 0, "alignY": 0, "zoom": 1.3, "zoomX": 0, "zoomY": -0.5},
     "tutorial": {
       "model": "assets/models/lateral_raise.glb",
       "poster": "assets/tutorials/lateral_raise_poster.png",
